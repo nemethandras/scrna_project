@@ -1,0 +1,233 @@
+# ─────────────────────────────────────────────
+# Configuration
+# ─────────────────────────────────────────────
+configfile: "config/config.yaml"
+
+SAMPLES   = config["samples"]
+RUN_ID    = config["run_id"]
+FASTQ_DIR = config["fastq_dir"]
+
+print(f"DEBUG - run_id: {RUN_ID}  samples: {SAMPLES}")
+
+# ─────────────────────────────────────────────
+# Rule all — defines the final targets
+# Snakemake works backwards from these to figure
+# out every step that needs to run
+# ─────────────────────────────────────────────
+rule all:
+    input:
+        expand("results/{run}/fastqc/{sample}_1_fastqc.html", run=RUN_ID, sample=SAMPLES),
+        expand("results/{run}/fastqc/{sample}_2_fastqc.html", run=RUN_ID, sample=SAMPLES),
+        expand("results/{run}/bam/{sample}.sorted.bam.bai",   run=RUN_ID, sample=SAMPLES),
+        expand("results/{run}/vcf/{sample}.filtered.vcf",     run=RUN_ID, sample=SAMPLES)
+
+
+# ─────────────────────────────────────────────
+# FastQC — quality check on raw reads
+# ─────────────────────────────────────────────
+rule fastqc:
+    input:
+        r1 = FASTQ_DIR + "/{sample}_1.fastq",
+        r2 = FASTQ_DIR + "/{sample}_2.fastq"
+    output:
+        "results/" + RUN_ID + "/fastqc/{sample}_1_fastqc.html",
+        "results/" + RUN_ID + "/fastqc/{sample}_2_fastqc.html"
+    log:
+        "logs/" + RUN_ID + "/fastqc/{sample}.log"
+    shell:
+        "fastqc {input.r1} {input.r2} --outdir results/" + RUN_ID + "/fastqc/ 2> {log}"
+
+
+# ─────────────────────────────────────────────
+# STAR index — run once, not per sample
+# ─────────────────────────────────────────────
+rule star_index:
+    input:
+        fasta = config["reference_genome"],
+        gtf   = config["annotation_gtf"]
+    output:
+        directory(config["star_index_dir"])
+    threads:
+        config["star"]["threads"]
+    log:
+        "logs/star_index.log"
+    shell:
+        """
+        mkdir -p {output}
+        STAR --runMode genomeGenerate \
+             --genomeDir {output} \
+             --genomeFastaFiles {input.fasta} \
+             --sjdbGTFfile {input.gtf} \
+             --sjdbOverhang {config[star][sjdb_overhang]} \
+             --genomeSAindexNbases {config[star][genome_sa_index_nbases]} \
+             --runThreadN {threads} \
+             2> {log}
+        """
+
+
+# ─────────────────────────────────────────────
+# STAR align — one job per sample
+# ─────────────────────────────────────────────
+rule star_align:
+    input:
+        r1    = FASTQ_DIR + "/{sample}_1.fastq",
+        r2    = FASTQ_DIR + "/{sample}_2.fastq",
+        index = config["star_index_dir"]
+    output:
+        bam = "results/" + RUN_ID + "/star/{sample}/Aligned.out.bam"
+    threads:
+        config["star"]["threads"]
+    log:
+        "logs/" + RUN_ID + "/star/{sample}.log"
+    params:
+        prefix = "results/" + RUN_ID + "/star/{sample}/"
+    shell:
+        """
+        STAR --runThreadN {threads} \
+             --genomeDir {input.index} \
+             --readFilesIn {input.r1} {input.r2} \
+             --outSAMtype BAM Unsorted \
+             --outSAMattributes NH HI AS NM MD \
+             --outFileNamePrefix {params.prefix} \
+             2> {log}
+        """
+
+
+# ─────────────────────────────────────────────
+# Samtools sort
+# ─────────────────────────────────────────────
+rule samtools_sort:
+    input:
+        "results/" + RUN_ID + "/star/{sample}/Aligned.out.bam"
+    output:
+        "results/" + RUN_ID + "/bam/{sample}.sorted.bam"
+    threads:
+        config["samtools"]["threads"]
+    log:
+        "logs/" + RUN_ID + "/samtools_sort/{sample}.log"
+    shell:
+        "samtools sort -@ {threads} -o {output} {input} 2> {log}"
+
+
+# ─────────────────────────────────────────────
+# Samtools index
+# ─────────────────────────────────────────────
+rule samtools_index:
+    input:
+        "results/" + RUN_ID + "/bam/{sample}.sorted.bam"
+    output:
+        "results/" + RUN_ID + "/bam/{sample}.sorted.bam.bai"
+    log:
+        "logs/" + RUN_ID + "/samtools_index/{sample}.log"
+    shell:
+        "samtools index {input} 2> {log}"
+
+
+# ─────────────────────────────────────────────
+# Samtools flagstat — QC mapping rate check
+# Fails loudly if mapping rate is below threshold
+# ─────────────────────────────────────────────
+rule samtools_flagstat:
+    input:
+        "results/" + RUN_ID + "/bam/{sample}.sorted.bam"
+    output:
+        "results/" + RUN_ID + "/bam/{sample}.flagstat.txt"
+    log:
+        "logs/" + RUN_ID + "/samtools_flagstat/{sample}.log"
+    params:
+        min_rate = config["samtools"]["min_mapping_rate"]
+    shell:
+        """
+        samtools flagstat {input} > {output} 2> {log}
+
+        mapping_rate=$(grep "mapped (" {output} \
+            | head -1 \
+            | grep -oP '[0-9]+\.[0-9]+(?=%)' \
+            | head -1)
+
+        echo "Mapping rate for {wildcards.sample}: ${{mapping_rate}}%"
+
+        python3 -c "
+rate = float('${{mapping_rate}}')
+threshold = float('{params.min_rate}')
+if rate < threshold:
+    raise SystemExit(f'FAIL: mapping rate {{rate:.1f}}% is below threshold {{threshold}}%')
+else:
+    print(f'PASS: mapping rate {{rate:.1f}}%')
+"
+        """
+
+
+# ─────────────────────────────────────────────
+# bcftools mpileup — pileup reads at every site
+# ─────────────────────────────────────────────
+rule bcftools_mpileup:
+    input:
+        bam   = "results/" + RUN_ID + "/bam/{sample}.sorted.bam",
+        bai   = "results/" + RUN_ID + "/bam/{sample}.sorted.bam.bai",
+        ref   = config["reference_genome"]
+    output:
+        "results/" + RUN_ID + "/vcf/{sample}.mpileup.bcf"
+    log:
+        "logs/" + RUN_ID + "/bcftools_mpileup/{sample}.log"
+    params:
+        min_bq = config["bcftools"]["min_base_quality"],
+        min_mq = config["bcftools"]["min_mapping_quality"]
+    shell:
+        """
+        bcftools mpileup \
+            -f {input.ref} \
+            -q {params.min_mq} \
+            -Q {params.min_bq} \
+            --output-type b \
+            -o {output} \
+            {input.bam} \
+            2> {log}
+        """
+
+
+# ─────────────────────────────────────────────
+# bcftools call — call variants from pileup
+# ─────────────────────────────────────────────
+rule bcftools_call:
+    input:
+        "results/" + RUN_ID + "/vcf/{sample}.mpileup.bcf"
+    output:
+        "results/" + RUN_ID + "/vcf/{sample}.raw.vcf"
+    log:
+        "logs/" + RUN_ID + "/bcftools_call/{sample}.log"
+    params:
+        caller = config["bcftools"]["caller"]
+    shell:
+        """
+        bcftools call \
+            {params.caller} \
+            --variants-only \
+            --output-type v \
+            -o {output} \
+            {input} \
+            2> {log}
+        """
+
+
+# ─────────────────────────────────────────────
+# bcftools filter — apply quality thresholds
+# ─────────────────────────────────────────────
+rule bcftools_filter:
+    input:
+        "results/" + RUN_ID + "/vcf/{sample}.raw.vcf"
+    output:
+        "results/" + RUN_ID + "/vcf/{sample}.filtered.vcf"
+    log:
+        "logs/" + RUN_ID + "/bcftools_filter/{sample}.log"
+    params:
+        min_qual  = config["filters"]["min_qual"],
+        min_depth = config["filters"]["min_depth"]
+    shell:
+        """
+        bcftools filter \
+            -e 'QUAL < {params.min_qual} || DP < {params.min_depth}' \
+            -o {output} \
+            {input} \
+            2> {log}
+        """

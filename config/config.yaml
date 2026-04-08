@@ -1,0 +1,72 @@
+# ─────────────────────────────────────────────
+# Run identity
+# ─────────────────────────────────────────────
+# A unique label for this analysis run.
+# All outputs will be placed under results/<run_id>/
+# and logs under logs/<run_id>/ so runs never overwrite
+# each other.  Use something descriptive, e.g.:
+#   SRR1258218_chr22   pilot_chr22   patient01_wt
+run_id: SRR1258218_chr22
+
+# ─────────────────────────────────────────────
+# Samples
+# ─────────────────────────────────────────────
+# List all sample IDs here. Each must match the
+# prefix of your fastq files exactly, e.g.
+# SRR1258218 → SRR1258218_1.fastq / _2.fastq
+samples:
+  - SRR1258218
+
+# ─────────────────────────────────────────────
+# Input data
+# ─────────────────────────────────────────────
+# Directory that contains the raw FASTQ files.
+# Change this when switching to a new dataset.
+fastq_dir: data/SRR1258218
+
+# ─────────────────────────────────────────────
+# Reference data
+# ─────────────────────────────────────────────
+reference_genome: data/reference/chr22.fa
+annotation_gtf:   data/reference/gencode.v47.chr22.gtf
+star_index_dir:   data/reference/star_index_chr22_oh74/
+
+# ─────────────────────────────────────────────
+# STAR alignment parameters
+# ─────────────────────────────────────────────
+star:
+  threads: 2
+  # Required when indexing a single chromosome instead of full genome
+  genome_sa_index_nbases: 11
+  # Minimum overhang on each side of a splice junction
+  # Standard value: read_length - 1 (reads here are 75bp)
+  sjdb_overhang: 74
+
+# ─────────────────────────────────────────────
+# Samtools
+# ─────────────────────────────────────────────
+samtools:
+  threads: 2
+  # Pipeline will warn and stop if mapping rate falls below this
+  min_mapping_rate: 85
+
+# ─────────────────────────────────────────────
+# bcftools variant calling
+# ─────────────────────────────────────────────
+bcftools:
+  # Minimum base quality to count a read at a position
+  min_base_quality: 20
+  # Minimum mapping quality to include a read
+  min_mapping_quality: 20
+  # Variant calling model: use multiallelic caller (-m)
+  caller: "-m"
+
+# ─────────────────────────────────────────────
+# VCF filtering thresholds
+# ─────────────────────────────────────────────
+filters:
+  # Minimum variant quality score (QUAL column in VCF)
+  min_qual: 10
+  # Minimum read depth at a variant site
+  min_depth: 3
+

@@ -1,0 +1,16 @@
+# ── Data ───────────────────────────────────────────────────────────────────────
+# Raw FASTQ files and reference data are large and sourced externally.
+# Download instructions belong in the README, not in git.
+data/
+
+# ── Generated outputs ──────────────────────────────────────────────────────────
+# Everything under results/ and logs/ is produced by the pipeline and
+# reproducible from the inputs — no need to track it.
+results/
+logs/
+
+# ── Snakemake internals ────────────────────────────────────────────────────────
+.snakemake/
+
+# ── OS / editor noise ─────────────────────────────────────────────────────────
+.DS_Store
