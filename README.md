@@ -77,7 +77,7 @@ Results land in `results/<run-id>/` and logs in `logs/<run-id>/`. Previous runs 
 --samples      one or more sample IDs matching FASTQ prefixes (required)
 --fastq-dir    directory containing the FASTQ files (required)
 --sequencing   paired (default) or single
---cores        number of CPU cores (default: 4)
+--cores        number of CPU cores (default: 16)
 -n/--dry-run   show what would run without executing anything
 
 reference overrides (optional — fall back to config/config.yaml):

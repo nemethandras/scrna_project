@@ -39,7 +39,7 @@ star_index_dir:   data/reference/star_index_chr22_oh74/
 # STAR alignment parameters
 # ─────────────────────────────────────────────
 star:
-  threads: 2
+  threads: 16
   # Required when indexing a single chromosome instead of full genome
   genome_sa_index_nbases: 11
   # Minimum overhang on each side of a splice junction
@@ -50,7 +50,7 @@ star:
 # Samtools
 # ─────────────────────────────────────────────
 samtools:
-  threads: 2
+  threads: 8
   # Pipeline will warn and stop if mapping rate falls below this
   min_mapping_rate: 85
 

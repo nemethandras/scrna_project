@@ -50,8 +50,8 @@ examples:
         help="sequencing layout (default: paired)",
     )
     parser.add_argument(
-        "--cores", type=int, default=4,
-        help="number of CPU cores to use (default: 4)",
+        "--cores", type=int, default=16,
+        help="number of CPU cores to use (default: 16)",
     )
     parser.add_argument(
         "-n", "--dry-run", action="store_true",
