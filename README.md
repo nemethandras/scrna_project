@@ -62,23 +62,56 @@ Activate the environment at the start of every session before running the pipeli
 
 ## Running the pipeline
 
-From the project root:
+Place your FASTQ files in a folder under `data/` and run:
 
 ```bash
-snakemake --snakefile workflow/Snakefile --cores 4
+python run_pipeline.py --run-id MY_SAMPLE_chr22 --samples MY_SAMPLE --fastq-dir data/MY_SAMPLE
 ```
 
-Add `-n` for a dry run (shows what would execute without running anything):
+Results land in `results/<run-id>/` and logs in `logs/<run-id>/`. Previous runs are never touched.
+
+**All options:**
+
+```
+--run-id       unique label for this run (required)
+--samples      one or more sample IDs matching FASTQ prefixes (required)
+--fastq-dir    directory containing the FASTQ files (required)
+--sequencing   paired (default) or single
+--cores        number of CPU cores (default: 4)
+-n/--dry-run   show what would run without executing anything
+
+reference overrides (optional — fall back to config/config.yaml):
+--reference    path to reference genome FASTA
+--gtf          path to annotation GTF
+--star-index   path to STAR index directory
+```
+
+**Examples:**
 
 ```bash
-snakemake --snakefile workflow/Snakefile --cores 4 -n
+# single-end
+python run_pipeline.py --run-id my_run --samples SAMPLE1 --fastq-dir data/SAMPLE1 --sequencing single
+
+# multiple samples
+python run_pipeline.py --run-id batch1 --samples S1 S2 S3 --fastq-dir data/batch1
+
+# custom reference
+python run_pipeline.py --run-id hg38_run --samples SAMPLE1 --fastq-dir data/SAMPLE1 \
+    --reference data/reference/hg38.fa \
+    --gtf data/reference/gencode.v47.gtf \
+    --star-index data/reference/star_index_hg38_oh99
+
+# dry run
+python run_pipeline.py --run-id test --samples SRR1258218 --fastq-dir data/SRR1258218 --dry-run
 ```
 
-## Setting up a new run
+If `--star-index` points to a directory that does not exist yet, Snakemake will build the index automatically before alignment.
 
-### 1. Add your FASTQ files
+## Preparing input data
 
-Place paired-end reads in a dedicated folder. The filenames must follow the pattern `<sample_id>_1.fastq` / `<sample_id>_2.fastq`:
+### FASTQ files
+
+Place reads in a dedicated folder. Filenames must follow the pattern `<sample_id>_1.fastq` (and `<sample_id>_2.fastq` for paired-end):
 
 ```
 data/
@@ -87,53 +120,29 @@ data/
     └── MY_SAMPLE_2.fastq
 ```
 
-### 2. Prepare reference files (skip if reusing an existing one)
+### Reference files
 
-Put the genome FASTA and GTF in `data/reference/`. Name the STAR index directory to reflect the genome and read length so different indices don't get confused:
+Put the genome FASTA and GTF in `data/reference/`. Name the STAR index directory to reflect the genome and read length:
 
 ```
 data/reference/
 ├── hg38.fa
 ├── gencode.v47.gtf
-└── star_index_hg38_oh99/    # will be built automatically on first run
+└── star_index_hg38_oh99/    # built automatically on first run
 ```
 
-The naming convention for index directories is `star_index_<genome>_oh<overhang>`, where overhang = read length − 1.
+Naming convention: `star_index_<genome>_oh<overhang>`, where overhang = read length − 1.
 
-### 3. Edit `config/config.yaml`
+### Changing read length or genome
 
-**Always change these:**
-
-```yaml
-run_id:    MY_SAMPLE_hg38     # unique label — all outputs go under results/<run_id>/
-samples:
-  - MY_SAMPLE                 # must match the FASTQ filename prefix
-fastq_dir: data/MY_SAMPLE     # folder containing the FASTQ files
-sequencing: paired            # paired (needs _1 + _2) or single (needs _1 only)
-```
-
-**Change these only when switching to a different reference or read length:**
+Edit these values in `config/config.yaml` before running:
 
 ```yaml
-reference_genome: data/reference/hg38.fa
-annotation_gtf:   data/reference/gencode.v47.gtf
-star_index_dir:   data/reference/star_index_hg38_oh99/
-
 star:
   sjdb_overhang: 99           # read_length - 1
   genome_sa_index_nbases: 14  # min(14, floor(log2(genome_size) / 2 - 1))
                               # STAR will print the correct value if wrong
 ```
-
-If `star_index_dir` points to a path that does not exist yet, Snakemake will build the index automatically before alignment.
-
-### 4. Run
-
-```bash
-snakemake --snakefile workflow/Snakefile --cores 4
-```
-
-Results land in `results/<run_id>/` and logs in `logs/<run_id>/`. Previous runs are never touched.
 
 ## Outputs
 
