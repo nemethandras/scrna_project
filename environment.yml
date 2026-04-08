@@ -1,0 +1,11 @@
+name: scrna
+channels:
+  - bioconda
+  - conda-forge
+  - defaults
+dependencies:
+  - snakemake=9.17.3
+  - star=2.7.10b
+  - fastqc=0.12.1
+  - samtools=1.23.1
+  - bcftools=1.23.1

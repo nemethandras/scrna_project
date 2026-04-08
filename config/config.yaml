@@ -24,6 +24,10 @@ samples:
 # Change this when switching to a new dataset.
 fastq_dir: data/SRR1258218
 
+# paired: expects {sample}_1.fastq and {sample}_2.fastq
+# single: expects {sample}_1.fastq only
+sequencing: paired
+
 # ─────────────────────────────────────────────
 # Reference data
 # ─────────────────────────────────────────────

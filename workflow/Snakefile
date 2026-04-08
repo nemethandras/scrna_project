@@ -6,8 +6,31 @@ configfile: "config/config.yaml"
 SAMPLES   = config["samples"]
 RUN_ID    = config["run_id"]
 FASTQ_DIR = config["fastq_dir"]
+PAIRED    = config["sequencing"] == "paired"
 
-print(f"DEBUG - run_id: {RUN_ID}  samples: {SAMPLES}")
+print(f"DEBUG - run_id: {RUN_ID}  samples: {SAMPLES}  sequencing: {config['sequencing']}")
+
+
+def fastqc_inputs(wildcards):
+    files = [f"{FASTQ_DIR}/{wildcards.sample}_1.fastq"]
+    if PAIRED:
+        files.append(f"{FASTQ_DIR}/{wildcards.sample}_2.fastq")
+    return files
+
+
+def fastqc_outputs(wildcards):
+    files = [f"results/{RUN_ID}/fastqc/{wildcards.sample}_1_fastqc.html"]
+    if PAIRED:
+        files.append(f"results/{RUN_ID}/fastqc/{wildcards.sample}_2_fastqc.html")
+    return files
+
+
+def star_reads(wildcards):
+    r1 = f"{FASTQ_DIR}/{wildcards.sample}_1.fastq"
+    if PAIRED:
+        r2 = f"{FASTQ_DIR}/{wildcards.sample}_2.fastq"
+        return f"{r1} {r2}"
+    return r1
 
 # ─────────────────────────────────────────────
 # Rule all — defines the final targets
@@ -17,7 +40,7 @@ print(f"DEBUG - run_id: {RUN_ID}  samples: {SAMPLES}")
 rule all:
     input:
         expand("results/{run}/fastqc/{sample}_1_fastqc.html", run=RUN_ID, sample=SAMPLES),
-        expand("results/{run}/fastqc/{sample}_2_fastqc.html", run=RUN_ID, sample=SAMPLES),
+        expand("results/{run}/fastqc/{sample}_2_fastqc.html", run=RUN_ID, sample=SAMPLES) if PAIRED else [],
         expand("results/{run}/bam/{sample}.sorted.bam.bai",   run=RUN_ID, sample=SAMPLES),
         expand("results/{run}/vcf/{sample}.filtered.vcf",     run=RUN_ID, sample=SAMPLES)
 
@@ -27,15 +50,13 @@ rule all:
 # ─────────────────────────────────────────────
 rule fastqc:
     input:
-        r1 = FASTQ_DIR + "/{sample}_1.fastq",
-        r2 = FASTQ_DIR + "/{sample}_2.fastq"
+        fastqc_inputs
     output:
-        "results/" + RUN_ID + "/fastqc/{sample}_1_fastqc.html",
-        "results/" + RUN_ID + "/fastqc/{sample}_2_fastqc.html"
+        fastqc_outputs
     log:
         "logs/" + RUN_ID + "/fastqc/{sample}.log"
     shell:
-        "fastqc {input.r1} {input.r2} --outdir results/" + RUN_ID + "/fastqc/ 2> {log}"
+        "fastqc {input} --outdir results/" + RUN_ID + "/fastqc/ 2> {log}"
 
 
 # ─────────────────────────────────────────────
@@ -70,8 +91,7 @@ rule star_index:
 # ─────────────────────────────────────────────
 rule star_align:
     input:
-        r1    = FASTQ_DIR + "/{sample}_1.fastq",
-        r2    = FASTQ_DIR + "/{sample}_2.fastq",
+        reads = star_reads,
         index = config["star_index_dir"]
     output:
         bam = "results/" + RUN_ID + "/star/{sample}/Aligned.out.bam"
@@ -85,7 +105,7 @@ rule star_align:
         """
         STAR --runThreadN {threads} \
              --genomeDir {input.index} \
-             --readFilesIn {input.r1} {input.r2} \
+             --readFilesIn {input.reads} \
              --outSAMtype BAM Unsorted \
              --outSAMattributes NH HI AS NM MD \
              --outFileNamePrefix {params.prefix} \

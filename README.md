@@ -49,6 +49,17 @@ scrna_project/
     └── <run_id>/            # logs mirror the results structure
 ```
 
+## Setup
+
+All dependencies are managed via conda. With [conda](https://docs.conda.io/en/latest/miniconda.html) installed, create and activate the environment once:
+
+```bash
+conda env create -f environment.yml
+conda activate scrna
+```
+
+Activate the environment at the start of every session before running the pipeline.
+
 ## Running the pipeline
 
 From the project root:
@@ -98,6 +109,7 @@ run_id:    MY_SAMPLE_hg38     # unique label — all outputs go under results/<r
 samples:
   - MY_SAMPLE                 # must match the FASTQ filename prefix
 fastq_dir: data/MY_SAMPLE     # folder containing the FASTQ files
+sequencing: paired            # paired (needs _1 + _2) or single (needs _1 only)
 ```
 
 **Change these only when switching to a different reference or read length:**
