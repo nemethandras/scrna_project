@@ -18,11 +18,14 @@ def fastqc_inputs(wildcards):
     return files
 
 
-def fastqc_outputs(wildcards):
-    files = [f"results/{RUN_ID}/fastqc/{wildcards.sample}_1_fastqc.html"]
-    if PAIRED:
-        files.append(f"results/{RUN_ID}/fastqc/{wildcards.sample}_2_fastqc.html")
-    return files
+FASTQC_OUTPUTS = (
+    [
+        "results/" + RUN_ID + "/fastqc/{sample}_1_fastqc.html",
+        "results/" + RUN_ID + "/fastqc/{sample}_2_fastqc.html",
+    ]
+    if PAIRED else
+    ["results/" + RUN_ID + "/fastqc/{sample}_1_fastqc.html"]
+)
 
 
 def star_reads(wildcards):
@@ -52,7 +55,7 @@ rule fastqc:
     input:
         fastqc_inputs
     output:
-        fastqc_outputs
+        FASTQC_OUTPUTS
     log:
         "logs/" + RUN_ID + "/fastqc/{sample}.log"
     shell:
@@ -162,7 +165,7 @@ rule samtools_flagstat:
 
         mapping_rate=$(grep "mapped (" {output} \
             | head -1 \
-            | grep -oP '[0-9]+\.[0-9]+(?=%)' \
+            | grep -oP '[0-9]+\\.[0-9]+(?=%)' \
             | head -1)
 
         echo "Mapping rate for {wildcards.sample}: ${{mapping_rate}}%"
