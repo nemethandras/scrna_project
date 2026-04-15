@@ -6,9 +6,9 @@ import subprocess
 import sys
 
 # Paths to the reference data bundled with the workflow
-DEFAULT_REFERENCE  = "workflow/genome.fa"
-DEFAULT_GTF        = "workflow/genes.gtf"
-DEFAULT_STAR_INDEX = "workflow/star_index_hg38_oh99"
+DEFAULT_REFERENCE  = "data/reference/genome.fa"
+DEFAULT_GTF        = "data/reference/genes.gtf"
+DEFAULT_STAR_INDEX = "data/reference/star_index_hg38_oh99"
 
 
 def main():
@@ -62,6 +62,10 @@ examples:
         "-n", "--dry-run", action="store_true",
         help="show what would run without executing anything",
     )
+    parser.add_argument(
+        "--rerun-incomplete", action="store_true",
+        help="re-run jobs with incomplete output files from a previous failed run",
+    )
 
     ref = parser.add_argument_group(
         "reference overrides",
@@ -103,6 +107,8 @@ examples:
     ]
     if args.dry_run:
         cmd.append("-n")
+    if args.rerun_incomplete:
+        cmd.append("--rerun-incomplete")
 
     result = subprocess.run(cmd)
     sys.exit(result.returncode)

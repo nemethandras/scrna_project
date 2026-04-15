@@ -31,17 +31,17 @@ sequencing: paired
 # ─────────────────────────────────────────────
 # Reference data
 # ─────────────────────────────────────────────
-reference_genome: workflow/genome.fa
-annotation_gtf:   workflow/genes.gtf
-star_index_dir:   workflow/star_index_hg38_oh99/
+reference_genome: data/reference/genome.fa
+annotation_gtf:   data/reference/genes.gtf
+star_index_dir:   data/reference/star_index_hg38_oh99/
 
 # ─────────────────────────────────────────────
 # STAR alignment parameters
 # ─────────────────────────────────────────────
 star:
   threads: 16
-  # Required when indexing a single chromosome instead of full genome
-  genome_sa_index_nbases: 11
+  # 14 for full genome (hg38); use 11 only for single-chromosome references
+  genome_sa_index_nbases: 14
   # Minimum overhang on each side of a splice junction
   # Standard value: read_length - 1 (reads here are 75bp)
   sjdb_overhang: 74
