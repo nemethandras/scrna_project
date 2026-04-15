@@ -5,6 +5,11 @@ import argparse
 import subprocess
 import sys
 
+# Paths to the reference data bundled with the workflow
+DEFAULT_REFERENCE  = "workflow/genome.fa"
+DEFAULT_GTF        = "workflow/genes.gtf"
+DEFAULT_STAR_INDEX = "workflow/star_index_hg38_oh99"
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -13,20 +18,20 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 examples:
-  # paired-end run
-  python run_pipeline.py --run-id SRR1258218_chr22 --samples SRR1258218 --fastq-dir data/SRR1258218
+  # minimal — single-end, fastq-dir derived automatically
+  python run_pipeline.py --run-id SRR5071686_hg38 --sample SRR5071686
 
-  # single-end run
-  python run_pipeline.py --run-id my_run --samples SAMPLE1 --fastq-dir data/SAMPLE1 --sequencing single
+  # paired-end
+  python run_pipeline.py --run-id SRR5071686_hg38 --sample SRR5071686 --sequencing paired
 
-  # multiple samples
-  python run_pipeline.py --run-id batch1 --samples S1 S2 S3 --fastq-dir data/batch1
+  # override fastq location
+  python run_pipeline.py --run-id my_run --sample SAMPLE1 --fastq-dir /data/elsewhere
 
   # dry run (shows what would execute without running anything)
-  python run_pipeline.py --run-id test --samples SRR1258218 --fastq-dir data/SRR1258218 --dry-run
+  python run_pipeline.py --run-id test --sample SRR5071686 --dry-run
 
   # custom reference
-  python run_pipeline.py --run-id hg38_run --samples SAMPLE1 --fastq-dir data/SAMPLE1 \\
+  python run_pipeline.py --run-id hg38_run --sample SAMPLE1 \\
       --reference data/reference/hg38.fa \\
       --gtf data/reference/gencode.v47.gtf \\
       --star-index data/reference/star_index_hg38_oh99
@@ -38,16 +43,16 @@ examples:
         help="unique label for this run — outputs go to results/<run-id>/",
     )
     parser.add_argument(
-        "--samples", required=True, nargs="+",
-        help="one or more sample IDs matching FASTQ filename prefixes",
+        "--sample", required=True,
+        help="sample ID matching the FASTQ filename prefix",
     )
     parser.add_argument(
-        "--fastq-dir", required=True,
-        help="directory containing the FASTQ files",
+        "--fastq-dir", default=None, metavar="PATH",
+        help="directory containing the FASTQ files (default: data/<sample>)",
     )
     parser.add_argument(
-        "--sequencing", choices=["paired", "single"], default="paired",
-        help="sequencing layout (default: paired)",
+        "--sequencing", choices=["paired", "single"], default="single",
+        help="sequencing layout (default: single)",
     )
     parser.add_argument(
         "--cores", type=int, default=16,
@@ -60,28 +65,35 @@ examples:
 
     ref = parser.add_argument_group(
         "reference overrides",
-        "optional — falls back to values in config/config.yaml",
+        "optional — defaults to the hg38 reference bundled in workflow/",
     )
-    ref.add_argument("--reference", metavar="PATH", help="reference genome FASTA")
-    ref.add_argument("--gtf",       metavar="PATH", help="annotation GTF")
-    ref.add_argument("--star-index", metavar="PATH", help="STAR index directory")
+    ref.add_argument(
+        "--reference", metavar="PATH", default=DEFAULT_REFERENCE,
+        help=f"reference genome FASTA (default: {DEFAULT_REFERENCE})",
+    )
+    ref.add_argument(
+        "--gtf", metavar="PATH", default=DEFAULT_GTF,
+        help=f"annotation GTF (default: {DEFAULT_GTF})",
+    )
+    ref.add_argument(
+        "--star-index", metavar="PATH", default=DEFAULT_STAR_INDEX,
+        help=f"STAR index directory (default: {DEFAULT_STAR_INDEX})",
+    )
 
     args = parser.parse_args()
 
-    # Snakemake parses --config values as YAML, so a bracketed list works for samples
-    samples_yaml = "[" + ",".join(args.samples) + "]"
+    fastq_dir = args.fastq_dir if args.fastq_dir else f"data/{args.sample}"
+
+    samples_yaml = f"[{args.sample}]"
     config_overrides = [
         f"run_id={args.run_id}",
-        f"fastq_dir={args.fastq_dir}",
-        f"sequencing={args.sequencing}",
         f"samples={samples_yaml}",
+        f"fastq_dir={fastq_dir}",
+        f"sequencing={args.sequencing}",
+        f"reference_genome={args.reference}",
+        f"annotation_gtf={args.gtf}",
+        f"star_index_dir={args.star_index}",
     ]
-    if args.reference:
-        config_overrides.append(f"reference_genome={args.reference}")
-    if args.gtf:
-        config_overrides.append(f"annotation_gtf={args.gtf}")
-    if args.star_index:
-        config_overrides.append(f"star_index_dir={args.star_index}")
 
     cmd = [
         "snakemake",

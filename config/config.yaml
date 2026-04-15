@@ -31,9 +31,9 @@ sequencing: paired
 # ─────────────────────────────────────────────
 # Reference data
 # ─────────────────────────────────────────────
-reference_genome: data/reference/chr22.fa
-annotation_gtf:   data/reference/gencode.v47.chr22.gtf
-star_index_dir:   data/reference/star_index_chr22_oh74/
+reference_genome: workflow/genome.fa
+annotation_gtf:   workflow/genes.gtf
+star_index_dir:   workflow/star_index_hg38_oh99/
 
 # ─────────────────────────────────────────────
 # STAR alignment parameters
@@ -70,7 +70,7 @@ bcftools:
 # ─────────────────────────────────────────────
 filters:
   # Minimum variant quality score (QUAL column in VCF)
-  min_qual: 10
+  min_qual: 30
   # Minimum read depth at a variant site
-  min_depth: 3
+  min_depth: 10
 
