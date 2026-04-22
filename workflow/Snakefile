@@ -254,3 +254,20 @@ rule bcftools_filter:
             {input} \
             2> {log}
         """
+
+
+# ─────────────────────────────────────────────
+# Load to database — push variant counts and QC
+# metrics to Grist and full variant rows to SQLite
+# Disabled: database not yet set up
+# ─────────────────────────────────────────────
+# rule load_to_database:
+#     input:
+#         vcf      = "results/" + RUN_ID + "/vcf/{sample}.filtered.vcf",
+#         flagstat = "results/" + RUN_ID + "/bam/{sample}.flagstat.txt"
+#     output:
+#         touch("results/" + RUN_ID + "/db/{sample}.loaded")
+#     log:
+#         "logs/" + RUN_ID + "/load_to_database/{sample}.log"
+#     script:
+#         "../scripts/load_to_db.py"
