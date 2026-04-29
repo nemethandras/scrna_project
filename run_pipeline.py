@@ -30,6 +30,9 @@ examples:
   # dry run (shows what would execute without running anything)
   python run_pipeline.py --run-id test --sample SRR5071686 --dry-run
 
+  # custom db path
+  python run_pipeline.py --run-id SRR5071686_hg38 --sample SRR5071686 --db /path/to/variants.db
+
   # custom reference
   python run_pipeline.py --run-id hg38_run --sample SAMPLE1 \\
       --reference data/reference/hg38.fa \\
@@ -66,6 +69,10 @@ examples:
         "--rerun-incomplete", action="store_true",
         help="re-run jobs with incomplete output files from a previous failed run",
     )
+    parser.add_argument(
+        "--db", metavar="PATH", default=None,
+        help="SQLite database file for variant storage (default: results/variants.db)",
+    )
 
     ref = parser.add_argument_group(
         "reference overrides",
@@ -98,6 +105,8 @@ examples:
         f"annotation_gtf={args.gtf}",
         f"star_index_dir={args.star_index}",
     ]
+    if args.db:
+        config_overrides.append(f"db_path={args.db}")
 
     cmd = [
         "snakemake",

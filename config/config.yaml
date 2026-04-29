@@ -74,3 +74,10 @@ filters:
   # Minimum read depth at a variant site
   min_depth: 10
 
+# ─────────────────────────────────────────────
+# Database
+# ─────────────────────────────────────────────
+# SQLite database file that accumulates variant calls across all runs.
+# Override with --db on the command line.
+db_path: results/variants.db
+
