@@ -70,6 +70,10 @@ examples:
         help="re-run jobs with incomplete output files from a previous failed run",
     )
     parser.add_argument(
+        "--force", action="store_true",
+        help="force re-run of all steps even if outputs already exist",
+    )
+    parser.add_argument(
         "--db", metavar="PATH", default=None,
         help="SQLite database file for variant storage (default: results/variants.db)",
     )
@@ -118,6 +122,8 @@ examples:
         cmd.append("-n")
     if args.rerun_incomplete:
         cmd.append("--rerun-incomplete")
+    if args.force:
+        cmd.append("--forceall")
 
     result = subprocess.run(cmd)
     sys.exit(result.returncode)
