@@ -40,11 +40,11 @@ star_index_dir:   data/reference/star_index_hg38_oh99/
 # ─────────────────────────────────────────────
 star:
   threads: 16
-  # 14 for full genome (hg38); use 11 only for single-chromosome references
-  genome_sa_index_nbases: 14
-  # Minimum overhang on each side of a splice junction
-  # Standard value: read_length - 1 (reads here are 75bp)
-  sjdb_overhang: 74
+
+# read_length - 1; override with --sjdb-overhang if reads are not 75bp
+sjdb_overhang: 74
+# 14 for full genome; use 11 only for small/single-chromosome references
+genome_sa_index_nbases: 14
 
 # ─────────────────────────────────────────────
 # Samtools

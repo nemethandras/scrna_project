@@ -84,8 +84,8 @@ rule star_index:
              --genomeDir {output} \
              --genomeFastaFiles {input.fasta} \
              --sjdbGTFfile {input.gtf} \
-             --sjdbOverhang {config[star][sjdb_overhang]} \
-             --genomeSAindexNbases {config[star][genome_sa_index_nbases]} \
+             --sjdbOverhang {config[sjdb_overhang]} \
+             --genomeSAindexNbases {config[genome_sa_index_nbases]} \
              --runThreadN {threads} \
              2> {log}
         """

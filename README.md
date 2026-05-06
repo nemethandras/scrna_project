@@ -229,9 +229,11 @@ tail -f logs/nohup_MY_SAMPLE.log
 -n/--dry-run        show what would run without executing anything (always foreground)
 
 reference overrides (optional — defaults to config/config.yaml):
---reference         path to reference genome FASTA
---gtf               path to annotation GTF
---star-index        path to STAR index directory
+--reference               path to reference genome FASTA
+--gtf                     path to annotation GTF
+--star-index              path to STAR index directory
+--sjdb-overhang N         splice junction overhang = read_length - 1 (default: 74 for 75bp reads)
+--genome-sa-index-nbases  STAR genome index SA size; 14 for full genome, 11 for small references (default: 14)
 ```
 
 ### Examples
@@ -295,14 +297,19 @@ Naming convention: `star_index_<genome>_oh<overhang>`, where overhang = read len
 
 ### Changing read length or genome
 
-Edit these values in `config/config.yaml` before running:
+Pass the values on the command line — no need to edit any files:
 
-```yaml
-star:
-  sjdb_overhang: 99           # read_length - 1
-  genome_sa_index_nbases: 14  # min(14, floor(log2(genome_size) / 2 - 1))
-                              # STAR will print the correct value if wrong
+```bash
+# 100bp reads (overhang = read_length - 1)
+source .env && python run_pipeline.py --run-id MY_RUN --sample MY_SAMPLE \
+    --sjdb-overhang 99
+
+# small/single-chromosome reference
+source .env && python run_pipeline.py --run-id MY_RUN --sample MY_SAMPLE \
+    --genome-sa-index-nbases 11
 ```
+
+The defaults (74 for overhang, 14 for SA index) are set for 75bp reads against the full hg38 genome. STAR will print the recommended value if `--genome-sa-index-nbases` is wrong for your genome size.
 
 ## Outputs
 

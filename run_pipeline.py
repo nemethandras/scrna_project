@@ -99,6 +99,14 @@ examples:
         "--star-index", metavar="PATH", default=DEFAULT_STAR_INDEX,
         help=f"STAR index directory (default: {DEFAULT_STAR_INDEX})",
     )
+    ref.add_argument(
+        "--sjdb-overhang", type=int, default=74, metavar="N",
+        help="STAR splice junction overhang = read_length - 1 (default: 74 for 75bp reads)",
+    )
+    ref.add_argument(
+        "--genome-sa-index-nbases", type=int, default=14, metavar="N",
+        help="STAR genome index SA size; 14 for full genome, 11 for small references (default: 14)",
+    )
 
     args = parser.parse_args()
 
@@ -113,6 +121,8 @@ examples:
         f"reference_genome={args.reference}",
         f"annotation_gtf={args.gtf}",
         f"star_index_dir={args.star_index}",
+        f"sjdb_overhang={args.sjdb_overhang}",
+        f"genome_sa_index_nbases={args.genome_sa_index_nbases}",
     ]
     if args.db:
         config_overrides.append(f"db_path={args.db}")
