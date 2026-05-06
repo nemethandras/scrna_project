@@ -26,7 +26,7 @@ fastq_dir: data/SRR1258218
 
 # paired: expects {sample}_1.fastq and {sample}_2.fastq
 # single: expects {sample}_1.fastq only
-sequencing: paired
+sequencing: single
 
 # ─────────────────────────────────────────────
 # Reference data

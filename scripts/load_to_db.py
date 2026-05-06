@@ -35,7 +35,7 @@ def parse_args():
     p.add_argument("--sample",   required=True)
     p.add_argument("--vcf",      required=True, help="path to filtered VCF")
     p.add_argument("--flagstat", required=True, help="path to samtools flagstat output")
-    p.add_argument("--db",       default="variants.db", help="SQLite database path")
+    p.add_argument("--db",       default="results/variants.db", help="SQLite database path")
     p.add_argument("--reference", default="GRCh38")
     p.add_argument("--sequencing", default="single")
     return p.parse_args()
