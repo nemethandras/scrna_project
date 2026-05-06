@@ -99,7 +99,13 @@ Place your FASTQ files in a folder under `data/` and run:
 source .env && python run_pipeline.py --run-id MY_RUN --sample MY_SAMPLE
 ```
 
-Results land in `results/<run-id>/` and logs in `logs/<run-id>/`. Previous runs are never touched.
+The pipeline runs **in the background by default** — it detaches from your terminal so it keeps running even if you close your laptop or the SSH connection drops. Output is written to `logs/nohup_<sample>.log`. Results land in `results/<run-id>/`. Previous runs are never touched.
+
+Check progress at any time:
+
+```bash
+tail -f logs/nohup_MY_SAMPLE.log
+```
 
 ### Options
 
@@ -112,7 +118,8 @@ Results land in `results/<run-id>/` and logs in `logs/<run-id>/`. Previous runs 
 --db                SQLite database path (default: results/variants.db)
 --force             re-run all steps even if outputs already exist
 --rerun-incomplete  re-run jobs with incomplete outputs from a previous failed run
--n/--dry-run        show what would run without executing anything
+--foreground        run in the terminal instead of detaching (useful for debugging)
+-n/--dry-run        show what would run without executing anything (always foreground)
 
 reference overrides (optional — defaults to config/config.yaml):
 --reference         path to reference genome FASTA
@@ -123,7 +130,7 @@ reference overrides (optional — defaults to config/config.yaml):
 ### Examples
 
 ```bash
-# basic single-end run
+# standard run — detaches immediately, safe to close laptop
 source .env && python run_pipeline.py --run-id SRR5071697_hg38 --sample SRR5071697
 
 # paired-end
@@ -135,25 +142,23 @@ python run_pipeline.py --run-id SRR5071686_hg38 --sample SRR5071686 --dry-run
 # force re-run of all steps (e.g. after pipeline changes)
 source .env && python run_pipeline.py --run-id SRR5071686_hg38 --sample SRR5071686 --force
 
-# run detached from terminal — safe to close laptop
-source .env && nohup python run_pipeline.py --run-id SRR5071686_hg38 --sample SRR5071686 \
-    > logs/nohup_SRR5071686.log 2>&1 &
-
-# check progress of a detached run
-tail -f logs/nohup_SRR5071686.log
+# run in foreground to watch output live (e.g. for debugging)
+source .env && python run_pipeline.py --run-id SRR5071686_hg38 --sample SRR5071686 --foreground
 ```
 
 ### Running only the database step
 
-If upstream results already exist (e.g. adding a sample that was processed before the db step was introduced), call the script directly — no need to re-run the full pipeline:
+If upstream results already exist (e.g. adding a sample that was processed before the db step was introduced), call the loading script directly — no need to re-run the full pipeline:
 
 ```bash
-source .env && python scripts/load_to_db.py \
+source .env && conda run -n scrna python scripts/load_to_db.py \
     --run-id MY_RUN \
     --sample MY_SAMPLE \
     --vcf results/MY_RUN/vcf/MY_SAMPLE.filtered.vcf \
     --flagstat results/MY_RUN/bam/MY_SAMPLE.flagstat.txt
 ```
+
+Re-running this script for an existing run is safe — it removes any previous Grist entries for that run before inserting, so no duplicates are created.
 
 ## Preparing input data
 
