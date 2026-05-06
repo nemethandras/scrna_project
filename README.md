@@ -313,6 +313,28 @@ Reports all samples that share at least 40% of the query's variants. Options:
 --metric           overlap: shared/query total; jaccard: shared/union (default: overlap)
 ```
 
+## Exploring results in the notebook
+
+Open `notebooks/01_explore_fastq.ipynb` with the `scrna` kernel active. The notebook pulls data directly from SQLite — no manual configuration needed.
+
+**Requirements** (install once if not already present):
+
+```bash
+conda run -n scrna pip install ipywidgets plotly jupyterlab
+```
+
+**Sections:**
+
+| Section | What it shows |
+|---|---|
+| Cross-sample QC overview | Mapping rate (with 85% threshold), filtered variant counts, raw vs filtered comparison for every run |
+| Per-run deep-dive | Dropdown to select a run — depth distribution, QUAL scores, variant types (SNP/INDEL), allele frequency spectrum, variants per chromosome, depth vs QUAL scatter |
+| Cross-sample comparison | Two dropdowns — variant overlap, Jaccard similarity, side-by-side depth and allele frequency plots |
+| STAR alignment QC | Annotated splice % and % reads too short per sample (read from STAR log files) |
+| Raw SQL explorer | Text box to run any query against the database |
+
+> **Note:** If the pipeline is actively loading results to the database in the background, notebook queries will hang until the write lock is released. Wait for the pipeline to finish (`tail -f logs/batch.log`), then run the notebook.
+
 ## Preparing input data
 
 ### FASTQ files
