@@ -1,6 +1,8 @@
 # ─────────────────────────────────────────────
 # Configuration
 # ─────────────────────────────────────────────
+import os
+
 configfile: "config/config.yaml"
 
 SAMPLES   = config["samples"]
@@ -11,8 +13,14 @@ PAIRED    = config["sequencing"] == "paired"
 print(f"DEBUG - run_id: {RUN_ID}  samples: {SAMPLES}  sequencing: {config['sequencing']}")
 
 
+def get_r1(fastq_dir, sample):
+    """Accept {sample}.fastq or {sample}_1.fastq for single-end data."""
+    plain = f"{fastq_dir}/{sample}.fastq"
+    return plain if os.path.exists(plain) else f"{fastq_dir}/{sample}_1.fastq"
+
+
 def fastqc_inputs(wildcards):
-    files = [f"{FASTQ_DIR}/{wildcards.sample}_1.fastq"]
+    files = [get_r1(FASTQ_DIR, wildcards.sample)]
     if PAIRED:
         files.append(f"{FASTQ_DIR}/{wildcards.sample}_2.fastq")
     return files
@@ -29,7 +37,7 @@ FASTQC_OUTPUTS = (
 
 
 def star_reads(wildcards):
-    r1 = f"{FASTQ_DIR}/{wildcards.sample}_1.fastq"
+    r1 = get_r1(FASTQ_DIR, wildcards.sample)
     if PAIRED:
         r2 = f"{FASTQ_DIR}/{wildcards.sample}_2.fastq"
         return f"{r1} {r2}"
