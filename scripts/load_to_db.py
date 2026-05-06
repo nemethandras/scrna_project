@@ -36,7 +36,7 @@ def parse_args():
     p.add_argument("--vcf",      required=True, help="path to filtered VCF")
     p.add_argument("--flagstat", required=True, help="path to samtools flagstat output")
     p.add_argument("--db",       default="results/variants.db", help="SQLite database path")
-    p.add_argument("--reference", default="GRCh38")
+    p.add_argument("--reference", default="data/reference/genome.fa")
     p.add_argument("--sequencing", default="single")
     return p.parse_args()
 
@@ -198,6 +198,18 @@ def load_variants_sqlite(conn, vcf_path, run_id):
 # ─────────────────────────────────────────────
 # Push to Grist
 # ─────────────────────────────────────────────
+def grist_delete_existing(api, table, run_id):
+    """Delete any rows for this run_id so re-runs don't create duplicates."""
+    records = api.fetch_table(table)
+    ids = [
+        rid for rid, val in zip(records["id"], records.get("run_id", []))
+        if val == run_id
+    ]
+    if ids:
+        api.delete_records(table, ids)
+        print(f"  Removed {len(ids)} existing row(s) from {table}")
+
+
 def push_to_grist(args, total_reads, mapped_reads,
                   mapping_rate, raw_variants, filt_variants,
                   star_ver, bcftools_ver, pct_too_short):
@@ -208,7 +220,7 @@ def push_to_grist(args, total_reads, mapped_reads,
         api_key=os.environ["GRIST_API_KEY"]
     )
 
-    # Push to Runs table
+    grist_delete_existing(api, "Runs", args.run_id)
     api.add_records("Runs", [{
         "sample_name":             args.sample,
         "run_id":                  args.run_id,
@@ -225,13 +237,13 @@ def push_to_grist(args, total_reads, mapped_reads,
     }])
     print(f"  ✓ Run summary pushed to Grist Runs table")
 
-    # Push to QC_Summary table
+    grist_delete_existing(api, "QC_Summary", args.run_id)
     api.add_records("QC_Summary", [{
-        "run_id":       args.run_id,
-        "mapped_reads": mapped_reads,
-        "total_reads":  total_reads,
+        "run_id":        args.run_id,
+        "mapped_reads":  mapped_reads,
+        "total_reads":   total_reads,
         "pct_too_short": pct_too_short,
-        "notes":        f"{filt_variants} filtered variants",
+        "notes":         f"{filt_variants} filtered variants",
     }])
     print(f"  ✓ QC summary pushed to Grist QC_Summary table")
 

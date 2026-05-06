@@ -2,6 +2,7 @@
 """Command-line wrapper for the scRNA-seq variant calling pipeline."""
 
 import argparse
+import os
 import subprocess
 import sys
 
@@ -74,6 +75,10 @@ examples:
         help="force re-run of all steps even if outputs already exist",
     )
     parser.add_argument(
+        "--foreground", action="store_true",
+        help="run in the foreground instead of detaching from the terminal",
+    )
+    parser.add_argument(
         "--db", metavar="PATH", default=None,
         help="SQLite database file for variant storage (default: results/variants.db)",
     )
@@ -125,8 +130,21 @@ examples:
     if args.force:
         cmd.append("--forceall")
 
-    result = subprocess.run(cmd)
-    sys.exit(result.returncode)
+    if args.foreground or args.dry_run:
+        result = subprocess.run(cmd)
+        sys.exit(result.returncode)
+
+    log_path = f"logs/nohup_{args.sample}.log"
+    os.makedirs("logs", exist_ok=True)
+    with open(log_path, "w") as log_file:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=log_file,
+            stderr=log_file,
+            start_new_session=True,
+        )
+    print(f"Pipeline running in background (PID {proc.pid})")
+    print(f"Follow progress: tail -f {log_path}")
 
 
 if __name__ == "__main__":
