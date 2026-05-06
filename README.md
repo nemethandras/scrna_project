@@ -4,16 +4,74 @@ A Snakemake pipeline for quality control, alignment, variant calling, and databa
 
 ## Pipeline overview
 
+```mermaid
+flowchart TD
+    A([FASTQ]) --> B[FastQC\nquality report]
+    A          --> C[STAR align\nBAM unsorted]
+
+    C --> D[samtools sort\nsorted BAM]
+    D --> E[samtools index\nBAM index]
+    D --> F[samtools flagstat\nmapping rate QC\n⚠ aborts if below threshold]
+
+    E --> G[bcftools mpileup\npileup BCF]
+    G --> H[bcftools call\nraw VCF]
+    H --> I[bcftools filter\nfiltered VCF]
+
+    C -->|Log.final.out| J
+    F --> J
+    I --> J[load_to_database]
+
+    J --> K[(SQLite\nvariants.db)]
+    J --> L[(Grist\nRuns · QC_Summary · Samples)]
+
+    style K fill:#2d6a4f,color:#fff
+    style L fill:#1d3557,color:#fff
+    style F fill:#e63946,color:#fff
 ```
-FASTQ
-  └─ FastQC              → quality report
-  └─ STAR align          → BAM (unsorted)
-       └─ samtools sort + index  → sorted BAM
-            └─ samtools flagstat → mapping rate QC (fails if below threshold)
-            └─ bcftools mpileup
-                 └─ bcftools call   → raw VCF
-                      └─ bcftools filter → filtered VCF
-                           └─ load_to_database → SQLite + Grist
+
+## Database structure
+
+```mermaid
+erDiagram
+    samples {
+        INTEGER sample_id PK
+        TEXT    name
+        TEXT    date_added
+    }
+    runs {
+        TEXT    run_id PK
+        INTEGER sample_id FK
+        TEXT    reference
+        TEXT    sequencing
+        TEXT    run_date
+        REAL    mapping_rate
+        INTEGER total_raw
+        INTEGER total_filt
+    }
+    variants {
+        INTEGER variant_id PK
+        TEXT    chromosome
+        INTEGER position
+        TEXT    ref_allele
+        TEXT    alt_allele
+        TEXT    variant_type
+    }
+    genotype_calls {
+        INTEGER call_id PK
+        TEXT    run_id FK
+        INTEGER variant_id FK
+        TEXT    genotype
+        REAL    quality
+        INTEGER depth
+        INTEGER ref_depth
+        INTEGER alt_depth
+        REAL    allele_freq
+        TEXT    filter_status
+    }
+
+    samples     ||--o{ runs           : "one sample, many runs"
+    runs        ||--o{ genotype_calls : "one run, many calls"
+    variants    ||--o{ genotype_calls : "one position, called across samples"
 ```
 
 ## Dependencies
