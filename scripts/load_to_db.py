@@ -38,6 +38,7 @@ def parse_args():
     p.add_argument("--db",       default="results/variants.db", help="SQLite database path")
     p.add_argument("--reference", default="data/reference/genome.fa")
     p.add_argument("--sequencing", default="single")
+    p.add_argument("--star-log",  default=None, help="path to STAR Log.final.out")
     return p.parse_args()
 
 
@@ -57,6 +58,28 @@ def parse_flagstat(path):
                 if match:
                     rate = float(match.group(1))
     return total, mapped, rate
+
+
+# ─────────────────────────────────────────────
+# Parse STAR Log.final.out
+# ─────────────────────────────────────────────
+def parse_star_log(path):
+    """Extract annotated splice % and pct_too_short from STAR's final log."""
+    if not path or not os.path.exists(path):
+        return None, None
+    total_splices, annotated_splices, pct_too_short = 0, 0, 0.0
+    with open(path) as f:
+        for line in f:
+            if "Number of splices: Total" in line:
+                total_splices = int(line.split("|")[1].strip())
+            elif "Number of splices: Annotated (sjdb)" in line:
+                annotated_splices = int(line.split("|")[1].strip())
+            elif "% of reads unmapped: too short" in line:
+                pct_too_short = float(line.split("|")[1].strip().replace("%", ""))
+    annotated_splice_pct = (
+        round(annotated_splices / total_splices * 100, 2) if total_splices > 0 else None
+    )
+    return annotated_splice_pct, pct_too_short
 
 
 # ─────────────────────────────────────────────
@@ -201,10 +224,7 @@ def load_variants_sqlite(conn, vcf_path, run_id):
 def grist_delete_existing(api, table, run_id):
     """Delete any rows for this run_id so re-runs don't create duplicates."""
     records = api.fetch_table(table)
-    ids = [
-        rid for rid, val in zip(records["id"], records.get("run_id", []))
-        if val == run_id
-    ]
+    ids = [r.id for r in records if getattr(r, "run_id", None) == run_id]
     if ids:
         api.delete_records(table, ids)
         print(f"  Removed {len(ids)} existing row(s) from {table}")
@@ -212,8 +232,9 @@ def grist_delete_existing(api, table, run_id):
 
 def push_to_grist(args, total_reads, mapped_reads,
                   mapping_rate, raw_variants, filt_variants,
-                  star_ver, bcftools_ver, pct_too_short):
-    """Push run summary and QC metrics to Grist."""
+                  star_ver, bcftools_ver, pct_too_short,
+                  mean_depth, annotated_splice_pct):
+    """Push run summary, QC metrics, and sample record to Grist."""
     api = GristDocAPI(
         os.environ["GRIST_DOC_ID"],
         server=os.environ["GRIST_SERVER"],
@@ -239,13 +260,26 @@ def push_to_grist(args, total_reads, mapped_reads,
 
     grist_delete_existing(api, "QC_Summary", args.run_id)
     api.add_records("QC_Summary", [{
-        "run_id":        args.run_id,
-        "mapped_reads":  mapped_reads,
-        "total_reads":   total_reads,
-        "pct_too_short": pct_too_short,
-        "notes":         f"{filt_variants} filtered variants",
+        "run_id":               args.run_id,
+        "mapped_reads":         mapped_reads,
+        "total_reads":          total_reads,
+        "mean_depth":           mean_depth,
+        "pct_too_short":        pct_too_short,
+        "annotated_splice_pct": annotated_splice_pct,
+        "notes":                f"{filt_variants} filtered variants",
     }])
     print(f"  ✓ QC summary pushed to Grist QC_Summary table")
+
+    # Add sample record if not already present
+    existing = api.fetch_table("Samples")
+    if args.sample not in [r.name for r in existing]:
+        api.add_records("Samples", [{
+            "name":       args.sample,
+            "date_added": str(date.today()),
+        }])
+        print(f"  ✓ Sample record added to Grist Samples table")
+    else:
+        print(f"  Sample {args.sample} already in Grist Samples table")
 
 
 # ─────────────────────────────────────────────
@@ -300,12 +334,25 @@ def main():
     print(f"  ✓ {rows:,} variant calls loaded into SQLite")
     conn.close()
 
-    # 5. Push to Grist
+    # 5. Parse STAR log for additional QC metrics
+    print("  Parsing STAR log...")
+    annotated_splice_pct, pct_too_short = parse_star_log(args.star_log)
+    print(f"  Annotated splice %: {annotated_splice_pct}  Too short %: {pct_too_short}")
+
+    # 6. Calculate mean depth from SQLite
+    conn = sqlite3.connect(args.db)
+    mean_depth = conn.execute(
+        "SELECT ROUND(AVG(depth), 1) FROM genotype_calls WHERE run_id=?", (args.run_id,)
+    ).fetchone()[0]
+    conn.close()
+    print(f"  Mean depth: {mean_depth}x")
+
+    # 7. Push to Grist
     print("  Pushing to Grist...")
     push_to_grist(
         args, total_reads, mapped_reads, mapping_rate,
         raw_variants, filt_variants, star_ver, bcftools_ver,
-        pct_too_short=0.0   # placeholder — parse from STAR log if needed
+        pct_too_short, mean_depth, annotated_splice_pct,
     )
 
     print(f"\nDone. Run {args.run_id} loaded successfully.\n")

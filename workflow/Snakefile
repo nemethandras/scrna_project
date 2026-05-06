@@ -265,7 +265,8 @@ rule bcftools_filter:
 rule load_to_database:
     input:
         vcf      = "results/" + RUN_ID + "/vcf/{sample}.filtered.vcf",
-        flagstat = "results/" + RUN_ID + "/bam/{sample}.flagstat.txt"
+        flagstat = "results/" + RUN_ID + "/bam/{sample}.flagstat.txt",
+        star_log = "results/" + RUN_ID + "/star/{sample}/Log.final.out"
     output:
         touch("results/" + RUN_ID + "/db/{sample}.loaded")
     log:
@@ -282,6 +283,7 @@ rule load_to_database:
             --sample     {wildcards.sample} \
             --vcf        {input.vcf} \
             --flagstat   {input.flagstat} \
+            --star-log   {input.star_log} \
             --db         {params.db} \
             --reference  {params.reference} \
             --sequencing {params.sequencing} \
