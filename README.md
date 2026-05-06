@@ -31,6 +31,16 @@ flowchart TD
 
 ## Database structure
 
+The pipeline writes to two separate databases:
+
+- **SQLite** (`results/variants.db`) — lives on the server. Stores the full variant data for programmatic queries.
+- **Grist** — the web-based spreadsheet. Stores run summaries and QC metrics for human review.
+
+> **PK** (Primary Key) = the unique ID that identifies each row in a table.
+> **FK** (Foreign Key) = a reference to the PK of another table, used to link rows across tables.
+
+### SQLite — full variant storage
+
 ```mermaid
 erDiagram
     samples {
@@ -72,6 +82,45 @@ erDiagram
     samples     ||--o{ runs           : "one sample, many runs"
     runs        ||--o{ genotype_calls : "one run, many calls"
     variants    ||--o{ genotype_calls : "one position, called across samples"
+```
+
+### Grist — run summaries and QC
+
+```mermaid
+erDiagram
+    Samples {
+        TEXT name
+        TEXT population
+        TEXT cell_line
+        TEXT source_project
+        TEXT date_added
+    }
+    Runs {
+        TEXT run_id
+        TEXT sample_name
+        TEXT pipeline_version
+        TEXT reference_genome
+        TEXT sequencing_mode
+        TEXT star_version
+        TEXT bcftools_version
+        TEXT run_date
+        REAL mapping_rate
+        INTEGER total_raw_variants
+        INTEGER total_filtered_variants
+        TEXT vcf_file_path
+    }
+    QC_Summary {
+        TEXT run_id
+        INTEGER total_reads
+        INTEGER mapped_reads
+        REAL mean_depth
+        REAL pct_too_short
+        REAL annotated_splice_pct
+        TEXT notes
+    }
+
+    Samples     ||--o{ Runs       : ""
+    Runs        ||--|| QC_Summary : ""
 ```
 
 ## Dependencies
