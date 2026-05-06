@@ -79,6 +79,10 @@ examples:
         help="run in the foreground instead of detaching from the terminal",
     )
     parser.add_argument(
+        "--no-db", action="store_true",
+        help="skip the load_to_database step (results are not added to SQLite or Grist)",
+    )
+    parser.add_argument(
         "--db", metavar="PATH", default=None,
         help="SQLite database file for variant storage (default: results/variants.db)",
     )
@@ -126,6 +130,8 @@ examples:
     ]
     if args.db:
         config_overrides.append(f"db_path={args.db}")
+    if args.no_db:
+        config_overrides.append("no_db=True")
 
     cmd = [
         "snakemake",

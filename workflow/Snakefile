@@ -9,6 +9,7 @@ SAMPLES   = config["samples"]
 RUN_ID    = config["run_id"]
 FASTQ_DIR = config["fastq_dir"]
 PAIRED    = config["sequencing"] == "paired"
+NO_DB     = config.get("no_db", False)
 
 print(f"DEBUG - run_id: {RUN_ID}  samples: {SAMPLES}  sequencing: {config['sequencing']}")
 
@@ -55,7 +56,7 @@ rule all:
         expand("results/{run}/bam/{sample}.sorted.bam.bai",   run=RUN_ID, sample=SAMPLES),
         expand("results/{run}/bam/{sample}.flagstat.txt",     run=RUN_ID, sample=SAMPLES),
         expand("results/{run}/vcf/{sample}.filtered.vcf",     run=RUN_ID, sample=SAMPLES),
-        expand("results/{run}/db/{sample}.loaded",            run=RUN_ID, sample=SAMPLES)
+        [] if NO_DB else expand("results/{run}/db/{sample}.loaded", run=RUN_ID, sample=SAMPLES)
 
 
 # ─────────────────────────────────────────────
