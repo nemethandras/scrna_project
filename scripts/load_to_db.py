@@ -320,7 +320,8 @@ def main():
         "SELECT sample_id FROM samples WHERE name=?", (args.sample,)
     ).fetchone()[0]
 
-    # Insert run
+    # Insert run — delete existing genotype calls first to prevent duplicates
+    conn.execute("DELETE FROM genotype_calls WHERE run_id=?", (args.run_id,))
     conn.execute("""
         INSERT OR REPLACE INTO runs
             (run_id, sample_id, reference, sequencing,
