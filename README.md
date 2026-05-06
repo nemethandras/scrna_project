@@ -216,22 +216,36 @@ tail -f logs/nohup_MY_SAMPLE.log
 
 ### Options
 
+**Single sample** (use `--sample` + `--run-id`):
 ```
---run-id            unique label for this run (required)
---sample            sample ID matching the FASTQ filename prefix (required)
---fastq-dir         directory containing the FASTQ files (default: data/<sample>)
+--sample ID         sample ID matching the FASTQ filename prefix (required)
+--run-id ID         unique label for this run — outputs go to results/<run-id>/
+--fastq-dir PATH    FASTQ directory (default: data/<sample>)
+```
+
+**Batch** (use `--samples` + `--run-id-suffix`):
+```
+--samples ID ...    one or more sample IDs — run-id is auto-generated as {sample}{suffix}
+--run-id-suffix S   suffix appended to each sample ID to form the run ID (e.g. _hg38)
+```
+
+**Common options:**
+```
 --sequencing        paired or single (default: single)
 --cores             number of CPU cores (default: 16)
---db                SQLite database path (default: results/variants.db)
+--db PATH           SQLite database file (default: results/variants.db)
+--no-db             skip database loading entirely (useful for test/holdout samples)
 --force             re-run all steps even if outputs already exist
 --rerun-incomplete  re-run jobs with incomplete outputs from a previous failed run
---foreground        run in the terminal instead of detaching (useful for debugging)
--n/--dry-run        show what would run without executing anything (always foreground)
+--foreground        run in the terminal instead of detaching (single sample only)
+-n/--dry-run        show what would run without executing anything
+```
 
-reference overrides (optional — defaults to config/config.yaml):
---reference               path to reference genome FASTA
---gtf                     path to annotation GTF
---star-index              path to STAR index directory
+**Reference overrides** (optional — defaults to the hg38 reference in `data/reference/`):
+```
+--reference PATH          reference genome FASTA
+--gtf PATH                annotation GTF
+--star-index PATH         STAR index directory
 --sjdb-overhang N         splice junction overhang = read_length - 1 (default: 74 for 75bp reads)
 --genome-sa-index-nbases  STAR genome index SA size; 14 for full genome, 11 for small references (default: 14)
 ```
@@ -239,11 +253,19 @@ reference overrides (optional — defaults to config/config.yaml):
 ### Examples
 
 ```bash
-# standard run — detaches immediately, safe to close laptop
+# single sample — detaches immediately, safe to close laptop
 source .env && python run_pipeline.py --run-id SRR5071697_hg38 --sample SRR5071697
 
-# paired-end
-source .env && python run_pipeline.py --run-id SRR5071686_hg38 --sample SRR5071686 --sequencing paired
+# batch — runs samples sequentially, all detached, logs to logs/batch.log
+source .env && python run_pipeline.py \
+    --samples SRR5071662 SRR5071667 SRR5071672 SRR5071691 \
+    --run-id-suffix _hg38
+
+# batch with --no-db for test/holdout samples
+source .env && python run_pipeline.py \
+    --samples SRR5071692 \
+    --run-id-suffix _hg38 \
+    --no-db
 
 # dry run — shows what would execute without running anything
 python run_pipeline.py --run-id SRR5071686_hg38 --sample SRR5071686 --dry-run
@@ -253,6 +275,11 @@ source .env && python run_pipeline.py --run-id SRR5071686_hg38 --sample SRR50716
 
 # run in foreground to watch output live (e.g. for debugging)
 source .env && python run_pipeline.py --run-id SRR5071686_hg38 --sample SRR5071686 --foreground
+```
+
+Check batch progress:
+```bash
+tail -f logs/batch.log
 ```
 
 ### Running only the database step
@@ -269,17 +296,35 @@ source .env && conda run -n scrna python scripts/load_to_db.py \
 
 Re-running this script for an existing run is safe — it removes any previous Grist entries for that run before inserting, so no duplicates are created.
 
+### Matching an unknown VCF against the database
+
+To identify which sample an unknown VCF belongs to:
+
+```bash
+conda run -n scrna python scripts/match_vcf.py --vcf path/to/unknown.vcf
+```
+
+Reports all samples that share at least 40% of the query's variants. Options:
+
+```
+--vcf PATH         path to the unknown VCF (required)
+--db PATH          SQLite database (default: results/variants.db)
+--min-match N      minimum match % to report (default: 40)
+--metric           overlap: shared/query total; jaccard: shared/union (default: overlap)
+```
+
 ## Preparing input data
 
 ### FASTQ files
 
-Place reads in a dedicated folder. Filenames must follow the pattern `<sample>_1.fastq` (and `<sample>_2.fastq` for paired-end):
+Place reads in a dedicated folder, one folder per sample. For single-end data the pipeline accepts either `<sample>.fastq` or `<sample>_1.fastq`. For paired-end both `_1` and `_2` files are required:
 
 ```
 data/
 └── MY_SAMPLE/
-    ├── MY_SAMPLE_1.fastq
-    └── MY_SAMPLE_2.fastq   # paired-end only
+    ├── MY_SAMPLE.fastq        # single-end (or MY_SAMPLE_1.fastq)
+    ├── MY_SAMPLE_1.fastq      # paired-end R1
+    └── MY_SAMPLE_2.fastq      # paired-end R2
 ```
 
 ### Reference files
