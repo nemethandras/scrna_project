@@ -108,7 +108,8 @@ rule star_align:
         reads = star_reads,
         index = config["star_index_dir"]
     output:
-        bam = "results/" + RUN_ID + "/star/{sample}/Aligned.out.bam"
+        bam     = "results/" + RUN_ID + "/star/{sample}/Aligned.out.bam",
+        star_log = "results/" + RUN_ID + "/star/{sample}/Log.final.out"
     threads:
         config["star"]["threads"]
     log:
