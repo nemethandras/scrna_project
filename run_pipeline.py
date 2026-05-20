@@ -65,10 +65,18 @@ def run_single(run_id, sample, args, fastq_dir=None):
     print(f"Follow progress: tail -f {log_path}")
 
 
+def _notify_cmd(email, subject, body):
+    """Return a shell snippet that sends a one-line email notification."""
+    safe_subject = subject.replace('"', '\\"')
+    safe_body    = body.replace('"', '\\"')
+    return f'echo "{safe_body}" | mail -s "{safe_subject}" {email}'
+
+
 def run_batch(samples, suffix, args):
     """Run samples sequentially in a single detached process."""
     os.makedirs("logs", exist_ok=True)
     log_path = "logs/batch.log"
+    run_ids   = ", ".join(f"{s}{suffix}" for s in samples)
 
     script_lines = [
         "#!/usr/bin/env bash",
@@ -76,6 +84,20 @@ def run_batch(samples, suffix, args):
         f"exec >> {log_path} 2>&1",
         f'echo "Batch started: $(date)"',
     ]
+
+    if args.notify_email:
+        script_lines += [
+            f'_on_exit() {{',
+            f'  local code=$?',
+            f'  if [ $code -ne 0 ]; then',
+            f'    ' + _notify_cmd(args.notify_email,
+                                  f"Pipeline FAILED [{run_ids}]",
+                                  f"A sample failed. Check {log_path} for details."),
+            f'  fi',
+            f'}}',
+            f'trap _on_exit EXIT',
+        ]
+
     for sample in samples:
         run_id = f"{sample}{suffix}"
         cmd = build_snakemake_cmd(run_id, sample, args)
@@ -86,7 +108,14 @@ def run_batch(samples, suffix, args):
             cmd_str,
             f'echo "--- {sample} ({run_id}) finished: $(date) ---"',
         ]
+
     script_lines.append('echo "Batch finished: $(date)"')
+    if args.notify_email:
+        script_lines.append(
+            _notify_cmd(args.notify_email,
+                        f"Pipeline done [{run_ids}]",
+                        f"All {len(samples)} samples finished. Check {log_path}.")
+        )
 
     script = "\n".join(script_lines) + "\n"
 
@@ -177,6 +206,10 @@ examples:
     parser.add_argument(
         "--foreground", action="store_true",
         help="run in the foreground instead of detaching (single sample only)",
+    )
+    parser.add_argument(
+        "--notify-email", metavar="ADDR",
+        help="send an email when the batch finishes or fails (requires server mail)",
     )
     parser.add_argument(
         "--no-db", action="store_true",

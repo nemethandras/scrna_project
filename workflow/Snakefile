@@ -20,6 +20,17 @@ def get_r1(fastq_dir, sample):
     return plain if os.path.exists(plain) else f"{fastq_dir}/{sample}_1.fastq"
 
 
+def _se_stem_suffix():
+    """Return the stem suffix FastQC will use: '' for plain .fastq, '_1' for _1.fastq."""
+    if not SAMPLES:
+        return "_1"
+    plain = f"{FASTQ_DIR}/{SAMPLES[0]}.fastq"
+    return "" if os.path.exists(plain) else "_1"
+
+
+SE_STEM = _se_stem_suffix() if not PAIRED else "_1"
+
+
 def fastqc_inputs(wildcards):
     files = [get_r1(FASTQ_DIR, wildcards.sample)]
     if PAIRED:
@@ -33,7 +44,7 @@ FASTQC_OUTPUTS = (
         "results/" + RUN_ID + "/fastqc/{sample}_2_fastqc.html",
     ]
     if PAIRED else
-    ["results/" + RUN_ID + "/fastqc/{sample}_1_fastqc.html"]
+    [f"results/{RUN_ID}/fastqc/{{sample}}{SE_STEM}_fastqc.html"]
 )
 
 
@@ -51,7 +62,7 @@ def star_reads(wildcards):
 # ─────────────────────────────────────────────
 rule all:
     input:
-        expand("results/{run}/fastqc/{sample}_1_fastqc.html", run=RUN_ID, sample=SAMPLES),
+        expand("results/{run}/fastqc/{sample}" + SE_STEM + "_fastqc.html", run=RUN_ID, sample=SAMPLES),
         expand("results/{run}/fastqc/{sample}_2_fastqc.html", run=RUN_ID, sample=SAMPLES) if PAIRED else [],
         expand("results/{run}/bam/{sample}.sorted.bam.bai",   run=RUN_ID, sample=SAMPLES),
         expand("results/{run}/bam/{sample}.flagstat.txt",     run=RUN_ID, sample=SAMPLES),

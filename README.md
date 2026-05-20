@@ -234,6 +234,7 @@ tail -f logs/nohup_MY_SAMPLE.log
 --sequencing        paired or single (default: single)
 --cores             number of CPU cores (default: 16)
 --db PATH           SQLite database file (default: results/variants.db)
+--notify-email ADDR send an email when the batch finishes or fails (requires server mail)
 --no-db             skip database loading entirely (useful for test/holdout samples)
 --force             re-run all steps even if outputs already exist
 --rerun-incomplete  re-run jobs with incomplete outputs from a previous failed run
@@ -382,7 +383,7 @@ The defaults (74 for overhang, 14 for SA index) are set for 75bp reads against t
 
 | File | Description |
 |---|---|
-| `results/<run_id>/fastqc/<sample>_1_fastqc.html` | Per-read quality report |
+| `results/<run_id>/fastqc/<sample>[_1]_fastqc.html` | Per-read quality report (suffix matches input: `_1` if `<sample>_1.fastq`, none if `<sample>.fastq`) |
 | `results/<run_id>/bam/<sample>.sorted.bam` | Sorted, indexed alignment |
 | `results/<run_id>/bam/<sample>.flagstat.txt` | Mapping rate summary |
 | `results/<run_id>/vcf/<sample>.raw.vcf` | Unfiltered variants |
