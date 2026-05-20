@@ -62,12 +62,42 @@ def star_reads(wildcards):
 # ─────────────────────────────────────────────
 rule all:
     input:
+        config["common_snps_vcf"],
+        config["common_snps_vcf"] + ".tbi",
         expand("results/{run}/fastqc/{sample}" + SE_STEM + "_fastqc.html", run=RUN_ID, sample=SAMPLES),
         expand("results/{run}/fastqc/{sample}_2_fastqc.html", run=RUN_ID, sample=SAMPLES) if PAIRED else [],
         expand("results/{run}/bam/{sample}.sorted.bam.bai",   run=RUN_ID, sample=SAMPLES),
         expand("results/{run}/bam/{sample}.flagstat.txt",     run=RUN_ID, sample=SAMPLES),
-        expand("results/{run}/vcf/{sample}.filtered.vcf",     run=RUN_ID, sample=SAMPLES),
+        expand("results/{run}/vcf/{sample}.genotyped.vcf",    run=RUN_ID, sample=SAMPLES),
         [] if NO_DB else expand("results/{run}/db/{sample}.loaded", run=RUN_ID, sample=SAMPLES)
+
+
+# ─────────────────────────────────────────────
+# normalize_snp_panel — run once to produce the
+# chr-prefixed, bgzipped, tabix-indexed common
+# SNP panel used as target positions for pileup.
+# Re-runs only if the source VCF changes.
+# ─────────────────────────────────────────────
+rule normalize_snp_panel:
+    input:
+        vcf      = config["common_snps_source"],
+        conv     = "workflow/chr_name_conv.txt"
+    output:
+        vcf      = config["common_snps_vcf"],
+        tbi      = config["common_snps_vcf"] + ".tbi"
+    log:
+        "logs/normalize_snp_panel.log"
+    shell:
+        """
+        mkdir -p $(dirname {output.vcf})
+        bcftools annotate \
+            --rename-chrs {input.conv} \
+            --output-type z \
+            -o {output.vcf} \
+            {input.vcf} \
+            2> {log}
+        tabix -p vcf {output.vcf} 2>> {log}
+        """
 
 
 # ─────────────────────────────────────────────
@@ -205,13 +235,18 @@ else:
 
 
 # ─────────────────────────────────────────────
-# bcftools mpileup — pileup reads at every site
+# bcftools mpileup — pileup reads at common SNP
+# positions only (-T restricts to target sites).
+# --annotate AD adds allelic depth per position
+# so we can store ref/alt counts for all GTs.
 # ─────────────────────────────────────────────
 rule bcftools_mpileup:
     input:
-        bam   = "results/" + RUN_ID + "/bam/{sample}.sorted.bam",
-        bai   = "results/" + RUN_ID + "/bam/{sample}.sorted.bam.bai",
-        ref   = config["reference_genome"]
+        bam    = "results/" + RUN_ID + "/bam/{sample}.sorted.bam",
+        bai    = "results/" + RUN_ID + "/bam/{sample}.sorted.bam.bai",
+        ref    = config["reference_genome"],
+        snps   = config["common_snps_vcf"],
+        snps_i = config["common_snps_vcf"] + ".tbi"
     output:
         "results/" + RUN_ID + "/vcf/{sample}.mpileup.bcf"
     log:
@@ -223,8 +258,10 @@ rule bcftools_mpileup:
         """
         bcftools mpileup \
             -f {input.ref} \
+            -T {input.snps} \
             -q {params.min_mq} \
             -Q {params.min_bq} \
+            --annotate AD \
             --output-type b \
             -o {output} \
             {input.bam} \
@@ -233,7 +270,11 @@ rule bcftools_mpileup:
 
 
 # ─────────────────────────────────────────────
-# bcftools call — call variants from pileup
+# bcftools call — genotype all target positions.
+# --variants-only is intentionally omitted so
+# that 0/0 (ref/ref) calls are also emitted —
+# these are informative for donor matching when
+# coverage is sparse.
 # ─────────────────────────────────────────────
 rule bcftools_call:
     input:
@@ -248,7 +289,6 @@ rule bcftools_call:
         """
         bcftools call \
             {params.caller} \
-            --variants-only \
             --output-type v \
             -o {output} \
             {input} \
@@ -257,13 +297,18 @@ rule bcftools_call:
 
 
 # ─────────────────────────────────────────────
-# bcftools filter — apply quality thresholds
+# bcftools filter — apply quality thresholds.
+# QUAL < min_qual is only applied to ALT calls
+# (GT != "0/0") because ref/ref positions have
+# QUAL ~ 0 by design and would otherwise all be
+# dropped. DP < min_depth drops all positions
+# regardless of genotype.
 # ─────────────────────────────────────────────
 rule bcftools_filter:
     input:
         "results/" + RUN_ID + "/vcf/{sample}.raw.vcf"
     output:
-        "results/" + RUN_ID + "/vcf/{sample}.filtered.vcf"
+        "results/" + RUN_ID + "/vcf/{sample}.genotyped.vcf"
     log:
         "logs/" + RUN_ID + "/bcftools_filter/{sample}.log"
     params:
@@ -272,7 +317,7 @@ rule bcftools_filter:
     shell:
         """
         bcftools filter \
-            -e 'QUAL < {params.min_qual} || DP < {params.min_depth}' \
+            -e 'DP < {params.min_depth} || (GT!="0/0" && QUAL < {params.min_qual})' \
             -o {output} \
             {input} \
             2> {log}
@@ -285,7 +330,7 @@ rule bcftools_filter:
 # ─────────────────────────────────────────────
 rule load_to_database:
     input:
-        vcf      = "results/" + RUN_ID + "/vcf/{sample}.filtered.vcf",
+        vcf      = "results/" + RUN_ID + "/vcf/{sample}.genotyped.vcf",
         flagstat = "results/" + RUN_ID + "/bam/{sample}.flagstat.txt",
         star_log = "results/" + RUN_ID + "/star/{sample}/Log.final.out"
     output:

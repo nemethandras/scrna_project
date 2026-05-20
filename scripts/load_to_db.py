@@ -2,15 +2,18 @@
 """
 Loads pipeline outputs into:
   - Grist (run metadata + QC summary)
-  - SQLite (full variant data)
+  - SQLite (full genotype data at common SNP positions)
 
 Usage:
     python scripts/load_to_db.py \
         --run-id SRR1258218_chr22 \
         --sample SRR1258218 \
-        --vcf results/SRR1258218_chr22/vcf/SRR1258218.filtered.vcf \
+        --vcf results/SRR1258218_chr22/vcf/SRR1258218.genotyped.vcf \
         --flagstat results/SRR1258218_chr22/bam/SRR1258218.flagstat.txt \
         --db variants.db
+
+Run IDs must be unique. Loading the same run_id twice is an error.
+Use --force to overwrite an existing run (deletes all prior data for that run_id).
 """
 
 import os
@@ -22,6 +25,7 @@ from datetime import date
 from dotenv import load_dotenv
 from grist_api import GristDocAPI
 from cyvcf2 import VCF
+from validate_vcf import validate_external_vcf
 
 load_dotenv()
 
@@ -31,14 +35,18 @@ load_dotenv()
 # ─────────────────────────────────────────────
 def parse_args():
     p = argparse.ArgumentParser(description="Load pipeline outputs to Grist + SQLite")
-    p.add_argument("--run-id",   required=True)
-    p.add_argument("--sample",   required=True)
-    p.add_argument("--vcf",      required=True, help="path to filtered VCF")
-    p.add_argument("--flagstat", required=True, help="path to samtools flagstat output")
-    p.add_argument("--db",       default="results/variants.db", help="SQLite database path")
+    p.add_argument("--run-id",    required=True)
+    p.add_argument("--sample",    required=True)
+    p.add_argument("--vcf",       required=True, help="path to genotyped VCF")
+    p.add_argument("--flagstat",  required=True, help="path to samtools flagstat output")
+    p.add_argument("--db",        default="results/variants.db", help="SQLite database path")
     p.add_argument("--reference", default="data/reference/genome.fa")
     p.add_argument("--sequencing", default="single")
     p.add_argument("--star-log",  default=None, help="path to STAR Log.final.out")
+    p.add_argument("--force",        action="store_true",
+                   help="overwrite existing data for this run_id instead of erroring")
+    p.add_argument("--external-vcf", action="store_true",
+                   help="VCF was not produced by this pipeline — run hg38/naming validation first")
     return p.parse_args()
 
 
@@ -241,7 +249,11 @@ def push_to_grist(args, total_reads, mapped_reads,
         api_key=os.environ["GRIST_API_KEY"]
     )
 
-    grist_delete_existing(api, "Runs", args.run_id)
+    # --force was already validated against SQLite; mirror it in Grist
+    if args.force:
+        grist_delete_existing(api, "Runs", args.run_id)
+        grist_delete_existing(api, "QC_Summary", args.run_id)
+
     api.add_records("Runs", [{
         "sample_name":             args.sample,
         "run_id":                  args.run_id,
@@ -258,7 +270,6 @@ def push_to_grist(args, total_reads, mapped_reads,
     }])
     print(f"  ✓ Run summary pushed to Grist Runs table")
 
-    grist_delete_existing(api, "QC_Summary", args.run_id)
     api.add_records("QC_Summary", [{
         "run_id":               args.run_id,
         "mapped_reads":         mapped_reads,
@@ -290,17 +301,28 @@ def main():
 
     print(f"\nLoading results for run: {args.run_id}")
 
+    # 0. Validate external VCF if flagged
+    if args.external_vcf:
+        print("  Validating external VCF (build + chromosome naming)...")
+        try:
+            result = validate_external_vcf(args.vcf, require_hg38=True)
+        except ValueError as e:
+            raise SystemExit(f"\nERROR: {e}\n")
+        for w in result["warnings"]:
+            print(f"  WARNING: {w}")
+        print(f"  Build detected: {result['build']}  Naming: {result['naming_style']}")
+
     # 1. Parse flagstat
     print("  Parsing flagstat...")
     total_reads, mapped_reads, mapping_rate = parse_flagstat(args.flagstat)
     print(f"  Total reads: {total_reads:,}  Mapped: {mapped_reads:,}  Rate: {mapping_rate:.2f}%")
 
-    # 2. Count variants in raw + filtered VCF
-    print("  Counting variants...")
-    raw_vcf_path = args.vcf.replace(".filtered.vcf", ".raw.vcf")
-    raw_variants  = sum(1 for v in VCF(raw_vcf_path))
-    filt_variants = sum(1 for v in VCF(args.vcf))
-    print(f"  Raw variants: {raw_variants:,}  Filtered: {filt_variants:,}")
+    # 2. Count positions in raw + genotyped VCF
+    print("  Counting genotyped positions...")
+    raw_vcf_path   = args.vcf.replace(".genotyped.vcf", ".raw.vcf")
+    raw_variants   = sum(1 for v in VCF(raw_vcf_path))
+    filt_variants  = sum(1 for v in VCF(args.vcf))
+    print(f"  Raw positions: {raw_variants:,}  After depth filter: {filt_variants:,}")
 
     # 3. Get tool versions
     star_ver     = get_version(["STAR", "--version"])
@@ -308,8 +330,25 @@ def main():
     print(f"  STAR: {star_ver}  bcftools: {bcftools_ver}")
 
     # 4. Load into SQLite
-    print(f"  Loading variants into SQLite ({args.db})...")
+    print(f"  Loading genotypes into SQLite ({args.db})...")
     conn = init_sqlite(args.db)
+
+    # Duplicate run_id check — fail loudly unless --force was given
+    existing_run = conn.execute(
+        "SELECT run_id FROM runs WHERE run_id=?", (args.run_id,)
+    ).fetchone()
+    if existing_run:
+        if not args.force:
+            conn.close()
+            raise SystemExit(
+                f"\nERROR: run_id '{args.run_id}' already exists in the database.\n"
+                f"  Each run_id must be unique. Choose a different run_id, or\n"
+                f"  pass --force to overwrite the existing data for this run.\n"
+            )
+        print(f"  --force: removing existing data for run '{args.run_id}'")
+        conn.execute("DELETE FROM genotype_calls WHERE run_id=?", (args.run_id,))
+        conn.execute("DELETE FROM runs WHERE run_id=?", (args.run_id,))
+        conn.commit()
 
     # Insert sample if not exists
     conn.execute(
@@ -320,10 +359,8 @@ def main():
         "SELECT sample_id FROM samples WHERE name=?", (args.sample,)
     ).fetchone()[0]
 
-    # Insert run — delete existing genotype calls first to prevent duplicates
-    conn.execute("DELETE FROM genotype_calls WHERE run_id=?", (args.run_id,))
     conn.execute("""
-        INSERT OR REPLACE INTO runs
+        INSERT INTO runs
             (run_id, sample_id, reference, sequencing,
              run_date, mapping_rate, total_raw, total_filt)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)

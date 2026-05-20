@@ -35,6 +35,13 @@ reference_genome: data/reference/genome.fa
 annotation_gtf:   data/reference/genes.gtf
 star_index_dir:   data/reference/star_index_hg38_oh99/
 
+# 1000 Genomes common SNP panel (AF > 5%, hg38).
+# common_snps_source: raw VCF with bare chrom names (1, 2, … X).
+# common_snps_vcf:    chr-prefixed, bgzipped, tabix-indexed version
+#                     generated once by the normalize_snp_panel rule.
+common_snps_source: validation/genome1K.phase3.SNP_AF5e2.chr1toX.hg38.vcf
+common_snps_vcf:    data/reference/genome1K.hg38.common_snps.vcf.gz
+
 # ─────────────────────────────────────────────
 # STAR alignment parameters
 # ─────────────────────────────────────────────
@@ -69,9 +76,11 @@ bcftools:
 # VCF filtering thresholds
 # ─────────────────────────────────────────────
 filters:
-  # Minimum variant quality score (QUAL column in VCF)
+  # Minimum variant quality score applied to ALT calls only.
+  # Ref/ref (0/0) positions are kept if depth is sufficient — their
+  # QUAL is always near zero and filtering on it would discard them.
   min_qual: 30
-  # Minimum read depth at a variant site
+  # Minimum read depth required at any genotyped position (0/0, 0/1, 1/1).
   min_depth: 10
 
 # ─────────────────────────────────────────────
