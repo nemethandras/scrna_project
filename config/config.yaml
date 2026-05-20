@@ -90,3 +90,28 @@ filters:
 # Override with --db on the command line.
 db_path: results/variants.db
 
+# ─────────────────────────────────────────────
+# Demultiplexing (CellRanger → cell line assignment)
+# ─────────────────────────────────────────────
+# Fill in these fields and run:
+#   snakemake results/demux/{demux_run_id}/assignments.tsv
+#
+# cellranger_dir: path to a CellRanger output directory.
+#   Expects:  outs/possorted_genome_bam.bam
+#             outs/filtered_feature_bc_matrix/barcodes.tsv.gz
+# run_ids: which run_ids in the DB to use as reference cell lines.
+#   Use ["all"] to compare against every run in the DB.
+# demux_run_id: unique label for this demux run (stored in DB if load_db: true).
+# load_db: whether to write cell assignments back into the DB.
+demux:
+  cellranger_dir: null
+  run_ids: []
+  demux_run_id: null
+  load_db: false
+  threads: 8
+  # Scoring thresholds
+  min_depth: 10      # min reads at a position in a cell to use it for scoring
+  min_positions: 50  # min positions with coverage before attempting assignment
+  doublet_gap: 2.0   # min log-likelihood gap between top two lines to call singlet
+  no_match_threshold: -0.5  # mean log-likelihood per position below which → no_match
+

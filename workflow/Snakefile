@@ -355,3 +355,99 @@ rule load_to_database:
             --sequencing {params.sequencing} \
             2> {log}
         """
+
+
+# ═════════════════════════════════════════════
+# Demultiplexing — CellRanger BAM → cell line
+# assignment against the genotype database.
+#
+# These rules are NOT part of rule all.
+# Run explicitly:
+#   snakemake results/demux/<demux_run_id>/assignments.tsv
+#
+# Configure the demux: section in config.yaml first.
+# ═════════════════════════════════════════════
+
+def _demux_cfg(key):
+    """Retrieve a demux config value, failing clearly if demux is not configured."""
+    val = config.get("demux", {}).get(key)
+    if val is None:
+        raise ValueError(
+            f"demux.{key} is not set in config.yaml — "
+            f"fill in the demux: section before running demultiplexing."
+        )
+    return val
+
+
+# ─────────────────────────────────────────────
+# cellsnp_pileup — pileup the CellRanger BAM at
+# common SNP positions, per cell barcode.
+# Produces the per-cell AD/DP matrices used by
+# the scorer.
+# ─────────────────────────────────────────────
+rule cellsnp_pileup:
+    input:
+        bam     = lambda _: os.path.join(_demux_cfg("cellranger_dir"),
+                                         "outs/possorted_genome_bam.bam"),
+        barcodes = lambda _: os.path.join(_demux_cfg("cellranger_dir"),
+                                          "outs/filtered_feature_bc_matrix/barcodes.tsv.gz"),
+        snps    = config["common_snps_vcf"],
+        snps_i  = config["common_snps_vcf"] + ".tbi"
+    output:
+        directory("results/demux/{demux_run_id}/cellsnp")
+    threads:
+        lambda _: config.get("demux", {}).get("threads", 8)
+    log:
+        "logs/demux/{demux_run_id}/cellsnp.log"
+    shell:
+        """
+        mkdir -p {output}
+        cellsnp-lite \
+            -s {input.bam} \
+            -b {input.barcodes} \
+            -O {output} \
+            -R {input.snps} \
+            -p {threads} \
+            --minMAF 0 \
+            --minCOUNT 20 \
+            --gzip \
+            2> {log}
+        """
+
+
+# ─────────────────────────────────────────────
+# demux_cells — score each cell barcode against
+# all reference genotypes in the DB and assign
+# it to the best-matching cell line.
+# ─────────────────────────────────────────────
+rule demux_cells:
+    input:
+        cellsnp = "results/demux/{demux_run_id}/cellsnp"
+    output:
+        "results/demux/{demux_run_id}/assignments.tsv"
+    log:
+        "logs/demux/{demux_run_id}/demux.log"
+    params:
+        db          = config["db_path"],
+        run_ids     = lambda _: " ".join(_demux_cfg("run_ids")),
+        min_depth   = lambda _: config.get("demux", {}).get("min_depth", 10),
+        min_pos     = lambda _: config.get("demux", {}).get("min_positions", 50),
+        gap         = lambda _: config.get("demux", {}).get("doublet_gap", 2.0),
+        threshold   = lambda _: config.get("demux", {}).get("no_match_threshold", -0.5),
+        demux_id    = "{demux_run_id}",
+        load_db_flag = lambda _: "--load-db" if config.get("demux", {}).get("load_db") else ""
+    shell:
+        """
+        python scripts/demux.py \
+            --cellsnp-dir {input.cellsnp} \
+            --db          {params.db} \
+            --run-ids     {params.run_ids} \
+            --output      {output} \
+            --min-depth   {params.min_depth} \
+            --min-positions {params.min_pos} \
+            --doublet-gap {params.gap} \
+            --no-match-threshold {params.threshold} \
+            --demux-run-id {params.demux_id} \
+            {params.load_db_flag} \
+            2> {log}
+        """
