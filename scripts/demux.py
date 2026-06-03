@@ -128,12 +128,21 @@ def query_db_genotypes(db_path, run_ids, positions, min_depth=10):
     missing = [r for r in run_ids
                if not conn.execute("SELECT 1 FROM runs WHERE run_id=?", (r,)).fetchone()]
     if missing:
-        conn.close()
-        raise SystemExit(
-            f"\nERROR: the following run_ids were not found in the database:\n"
+        print(
+            f"\nWARNING: the following run_ids were not found in the database and will be skipped:\n"
             + "\n".join(f"  {r}" for r in missing)
             + "\nRun 'sqlite3 results/variants.db \"SELECT run_id FROM runs;\"' "
-              "to list available run_ids.\n"
+              "to list available run_ids.\n",
+            file=sys.stderr,
+        )
+        run_ids = [r for r in run_ids if r not in missing]
+
+    if not run_ids:
+        conn.close()
+        raise SystemExit(
+            "\nERROR: no reference run_ids found in the database.\n"
+            "Run bulk samples first to build the reference genotype DB,\n"
+            "or check 'sqlite3 results/variants.db \"SELECT run_id FROM runs;\"'.\n"
         )
 
     pos_index = {p: i for i, p in enumerate(positions)}
@@ -396,7 +405,7 @@ def main():
     print(f"Querying DB for reference genotypes...")
     donors, dosage = query_db_genotypes(args.db, args.run_ids, positions, args.min_depth)
 
-    print(f"  {len(donors)} reference line(s):")
+    print(f"  Using {len(donors)} reference line(s):")
     for d, n in zip(donors, (~np.isnan(dosage)).sum(axis=0)):
         print(f"    {d}: {n:,} positions with genotype call")
 

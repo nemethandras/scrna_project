@@ -369,7 +369,7 @@ rule load_to_database:
 # ═════════════════════════════════════════════
 
 def _demux_cfg(key):
-    """Retrieve a demux config value, failing clearly if demux is not configured."""
+    """Retrieve a required demux config value, failing clearly if not set."""
     val = config.get("demux", {}).get(key)
     if val is None:
         raise ValueError(
@@ -377,6 +377,37 @@ def _demux_cfg(key):
             f"fill in the demux: section before running demultiplexing."
         )
     return val
+
+
+def _demux_cfg_opt(key):
+    """Retrieve an optional demux config value; returns None if not set."""
+    return config.get("demux", {}).get(key)
+
+
+def _demux_bam():
+    """Return the BAM path: explicit demux.bam, or constructed from cellranger_dir."""
+    bam = _demux_cfg_opt("bam")
+    if bam:
+        return bam
+    cdir = _demux_cfg_opt("cellranger_dir")
+    if cdir:
+        return os.path.join(cdir, "outs/possorted_genome_bam.bam")
+    raise ValueError(
+        "Set either demux.bam or demux.cellranger_dir in config.yaml."
+    )
+
+
+def _demux_barcodes():
+    """Return the barcodes path: explicit demux.barcodes, or constructed from cellranger_dir."""
+    bc = _demux_cfg_opt("barcodes")
+    if bc:
+        return bc
+    cdir = _demux_cfg_opt("cellranger_dir")
+    if cdir:
+        return os.path.join(cdir, "outs/filtered_feature_bc_matrix/barcodes.tsv.gz")
+    raise ValueError(
+        "Set either demux.barcodes or demux.cellranger_dir in config.yaml."
+    )
 
 
 # ─────────────────────────────────────────────
@@ -387,10 +418,8 @@ def _demux_cfg(key):
 # ─────────────────────────────────────────────
 rule cellsnp_pileup:
     input:
-        bam     = lambda _: os.path.join(_demux_cfg("cellranger_dir"),
-                                         "outs/possorted_genome_bam.bam"),
-        barcodes = lambda _: os.path.join(_demux_cfg("cellranger_dir"),
-                                          "outs/filtered_feature_bc_matrix/barcodes.tsv.gz"),
+        bam      = lambda _: _demux_bam(),
+        barcodes = lambda _: _demux_barcodes(),
         snps    = config["common_snps_vcf"],
         snps_i  = config["common_snps_vcf"] + ".tbi"
     output:
@@ -429,7 +458,7 @@ rule demux_cells:
         "logs/demux/{demux_run_id}/demux.log"
     params:
         db          = config["db_path"],
-        run_ids     = lambda _: " ".join(_demux_cfg("run_ids")),
+        run_ids     = lambda _: " ".join(_demux_cfg("run_ids")) or "all",
         min_depth   = lambda _: config.get("demux", {}).get("min_depth", 10),
         min_pos     = lambda _: config.get("demux", {}).get("min_positions", 50),
         gap         = lambda _: config.get("demux", {}).get("doublet_gap", 2.0),

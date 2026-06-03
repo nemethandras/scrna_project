@@ -288,33 +288,32 @@ source VCF changes.
 
 ## Running the pipeline
 
-Place your FASTQ files in a folder under `data/` and run:
+`run_pipeline.py` has two modes selected with `--mode`:
+
+| Mode | What it does |
+|---|---|
+| `bulk` (default) | FASTQ → align → genotype at common SNPs → load to DB. Builds reference genotypes for known cell lines. |
+| `scrna` | BAM → cellsnp-lite → demux scorer → `assignments.tsv`. Assigns cell barcodes from a pooled experiment to cell lines already in the DB. |
+
+Both modes run **in the background by default** — the process detaches so it
+keeps running if you close the terminal.
+
+### Bulk mode
+
+Place FASTQ files under `data/<sample>/` and run:
 
 ```bash
-source .env && python run_pipeline.py --run-id MY_RUN --sample MY_SAMPLE
+source .env && python run_pipeline.py --mode bulk --run-id MY_RUN --sample MY_SAMPLE
 ```
 
-The pipeline runs **in the background by default** — it detaches from your
-terminal so it keeps running even if you close your laptop or the SSH
-connection drops. Output is written to `logs/nohup_<sample>.log`. Results land
-in `results/<run-id>/`. Previous runs are never touched.
-
-Check progress at any time:
-
-```bash
-tail -f logs/nohup_MY_SAMPLE.log
-```
-
-### Options
-
-**Single sample** (use `--sample` + `--run-id`):
+**Single sample options:**
 ```
 --sample ID         sample ID matching the FASTQ filename prefix (required)
 --run-id ID         unique label for this run — outputs go to results/<run-id>/
 --fastq-dir PATH    FASTQ directory (default: data/<sample>)
 ```
 
-**Batch** (use `--samples` + `--run-id-suffix`):
+**Batch options** (use `--samples` + `--run-id-suffix`):
 ```
 --samples ID ...    one or more sample IDs — run-id is auto-generated as {sample}{suffix}
 --run-id-suffix S   suffix appended to each sample ID to form the run ID (e.g. _hg38)
@@ -329,7 +328,7 @@ tail -f logs/nohup_MY_SAMPLE.log
 --no-db             skip database loading entirely (useful for test/holdout samples)
 --force             re-run all steps even if outputs already exist
 --rerun-incomplete  re-run jobs with incomplete outputs from a previous failed run
---foreground        run in the terminal instead of detaching (single sample only)
+--foreground        run in the terminal instead of detaching
 -n/--dry-run        show what would run without executing anything
 ```
 
@@ -342,31 +341,26 @@ tail -f logs/nohup_MY_SAMPLE.log
 --genome-sa-index-nbases  STAR genome index SA size; 14 for full genome, 11 for small references (default: 14)
 ```
 
-### Examples
+**Bulk examples:**
 
 ```bash
 # single sample — detaches immediately, safe to close laptop
-source .env && python run_pipeline.py --run-id SRR5071697_hg38 --sample SRR5071697
+source .env && python run_pipeline.py --mode bulk --run-id SRR5071697_hg38 --sample SRR5071697
 
 # batch — runs samples sequentially, all detached, logs to logs/batch.log
-source .env && python run_pipeline.py \
+source .env && python run_pipeline.py --mode bulk \
     --samples SRR5071662 SRR5071667 SRR5071672 SRR5071691 \
     --run-id-suffix _hg38
 
 # batch with --no-db for test/holdout samples
-source .env && python run_pipeline.py \
-    --samples SRR5071692 \
-    --run-id-suffix _hg38 \
-    --no-db
+source .env && python run_pipeline.py --mode bulk \
+    --samples SRR5071692 --run-id-suffix _hg38 --no-db
 
 # dry run — shows what would execute without running anything
-python run_pipeline.py --run-id SRR5071686_hg38 --sample SRR5071686 --dry-run
+python run_pipeline.py --mode bulk --run-id SRR5071686_hg38 --sample SRR5071686 --dry-run
 
 # force re-run of all steps (e.g. after pipeline changes)
-source .env && python run_pipeline.py --run-id SRR5071686_hg38 --sample SRR5071686 --force
-
-# run in foreground to watch output live (e.g. for debugging)
-source .env && python run_pipeline.py --run-id SRR5071686_hg38 --sample SRR5071686 --foreground
+source .env && python run_pipeline.py --mode bulk --run-id SRR5071686_hg38 --sample SRR5071686 --force
 ```
 
 Check batch progress:
@@ -441,56 +435,78 @@ Reports all samples that share at least 40% of the query's variants. Options:
 --metric           overlap: shared/query total; jaccard: shared/union (default: overlap)
 ```
 
-## Demultiplexing CellRanger data
+## Demultiplexing scRNA-seq data
 
-Use this to assign cell barcodes from a pooled scRNA-seq experiment to the
-cell lines they came from. All reference cell lines must already be in the
-database (run the main pipeline for each line first).
+Use `--mode scrna` to assign cell barcodes from a pooled scRNA-seq experiment
+to the cell lines they came from. All reference cell lines must already be in
+the database — run `--mode bulk` for each line first.
 
-### 1. Configure
+The scrna mode runs two steps: **cellsnp-lite** (pileup at common SNP positions
+per cell barcode), then the **demux scorer** (binomial log-likelihood match
+against reference genotypes in the DB).
 
-Edit the `demux:` section of `config.yaml`:
+### scRNA mode options
 
-```yaml
-demux:
-  cellranger_dir: /path/to/cellranger/outs   # contains possorted_genome_bam.bam
-                                              # and filtered_feature_bc_matrix/barcodes.tsv.gz
-  run_ids:
-    - HeLa_run1       # run_ids of the reference cell lines in the DB
-    - HEK293_run1
-    - K562_run1
-  demux_run_id: my_experiment_01    # unique label for this demux run
-  load_db: true                     # write assignments back to the DB
-  threads: 8
-  # Scoring thresholds — tune after inspecting score distributions
-  min_depth: 10       # min reads at a position in a cell to use for scoring
-  min_positions: 50   # min positions with coverage to attempt assignment
-  doublet_gap: 2.0    # min LL gap between top two lines to call a singlet
-  no_match_threshold: -0.5   # mean LL per position below which → no_match
+```
+--bam PATH              BAM file from CellRanger or STARsolo — triggers cellsnp-lite
+--barcodes PATH         barcodes.tsv.gz matching the BAM (required with --bam)
+--cellsnp-dir PATH      use an existing cellsnp-lite output dir, skip cellsnp step
+--demux-run-id ID       unique label for this demux run (required)
+--run-ids ID ...        run_ids in the DB to score against; default: all
+--load-db               write cell assignments back into the SQLite database
+--min-depth N           min reads at a position in a cell to use it (default: 1)
+--min-positions N       min covered positions to attempt assignment (default: 10)
+--doublet-gap F         min LL gap between top two lines for a singlet call (default: 2.0)
+--no-match-threshold F  mean LL per position below which → no_match (default: -0.5)
+--snps-vcf PATH         common SNP panel for cellsnp-lite (default: data/reference/genome1K.hg38.common_snps.vcf.gz)
+--cores N               threads for cellsnp-lite (default: 16)
 ```
 
-### 2. Run
+### scRNA examples
 
 ```bash
-snakemake results/demux/my_experiment_01/assignments.tsv
+# from a CellRanger BAM — runs cellsnp-lite then demux, detaches in background
+source .env && python run_pipeline.py --mode scrna \
+    --bam data/Pool_ctr/possorted_genome_bam.bam \
+    --barcodes data/Pool_ctr/barcodes.tsv.gz \
+    --demux-run-id pool_ctr_001
+
+# from an existing cellsnp-lite output — skip cellsnp, run demux only
+source .env && python run_pipeline.py --mode scrna \
+    --cellsnp-dir data/Pool_ctr/cellsnp \
+    --demux-run-id pool_ctr_001
+
+# score against specific run_ids only
+source .env && python run_pipeline.py --mode scrna \
+    --cellsnp-dir data/Pool_ctr/cellsnp \
+    --demux-run-id pool_ctr_001 \
+    --run-ids RKO_hg38 HCT116_hg38 HT29_hg38
+
+# write assignments back to the DB and watch live
+source .env && python run_pipeline.py --mode scrna \
+    --cellsnp-dir data/Pool_ctr/cellsnp \
+    --demux-run-id pool_ctr_001 \
+    --load-db --foreground
 ```
 
-This runs two steps automatically:
+Follow progress:
+```bash
+tail -f logs/demux/pool_ctr_001.log
+```
 
-1. **`cellsnp_pileup`** — pileups the CellRanger BAM at common SNP positions
-   per cell barcode using cellSNP-lite, producing sparse AD/DP matrices.
-2. **`demux_cells`** — queries the database for reference genotypes, scores
-   each cell against each line using binomial log-likelihood, and assigns
-   each barcode to the best match.
+> **Missing references:** if some `--run-ids` are not found in the DB, the
+> pipeline prints a warning and continues with the ones that are present. It
+> only fails if *no* references are found at all. Leave `--run-ids` unset (the
+> default) to automatically score against every run in the DB.
 
-### 3. Output
+### Output
 
-`results/demux/my_experiment_01/assignments.tsv`:
+`results/demux/<demux_run_id>/assignments.tsv`:
 
 ```
 barcode          assigned_line  status     score     second_score  n_positions  doublet  mean_ll_per_pos
-ACGTACGT-1       HeLa_run1      assigned   -4821.2   -7203.5       3847         False    -1.253
-TTGCAACG-1       doublet:HeLa+K562  doublet  -6102.1  -6201.8     3211         True     -1.900
+ACGTACGT-1       RKO_hg38       assigned   -4821.2   -7203.5       3847         False    -1.253
+TTGCAACG-1       doublet:RKO+HCT116  doublet  -6102.1  -6201.8    3211         True     -1.900
 CGTAGCTA-1       no_match       no_match                           12           False
 ```
 
@@ -503,21 +519,51 @@ CGTAGCTA-1       no_match       no_match                           12           
 | `no_match` | Mean log-likelihood per position below `no_match_threshold` — no line fits |
 | `insufficient_coverage` | Fewer than `min_positions` positions with reads — not enough data |
 
-If `load_db: true`, assignments are also written to the `cell_assignments`
+If `--load-db` is set, assignments are also written to the `cell_assignments`
 table in SQLite, keyed by `demux_run_id` + `cell_barcode`.
+
+### Advanced: Snakemake rules
+
+For dependency-tracked runs (re-uses cellsnp output if it already exists),
+configure `config.yaml` and call Snakemake directly:
+
+```yaml
+demux:
+  # Explicit paths — use these for flat CellRanger output or STARsolo output.
+  # Takes priority over cellranger_dir if set.
+  bam: data/Pool_ctr/possorted_genome_bam.bam
+  barcodes: data/Pool_ctr/barcodes.tsv.gz
+
+  # CellRanger outs/ directory — auto-constructs paths from outs/ subdirectory.
+  # Use this OR bam+barcodes, not both.
+  cellranger_dir: null
+
+  run_ids: []           # leave empty to score against all runs in DB
+  demux_run_id: pool_ctr_001
+  load_db: false
+  threads: 8
+  min_depth: 1
+  min_positions: 10
+  doublet_gap: 2.0
+  no_match_threshold: -0.5
+```
+
+```bash
+snakemake results/demux/pool_ctr_001/assignments.tsv
+```
 
 ### Tuning thresholds
 
-The two key thresholds interact:
-
+- **`min_depth`**: for scRNA-seq, use `1` (default). Bulk-style `10` is too
+  stringent — individual cells typically cover most positions at depth 1–3.
+- **`min_positions`**: minimum covered positions before attempting an
+  assignment. Use `10` for scRNA (default), `50` for bulk.
 - **`doublet_gap`**: raise it (e.g. `5.0`) to flag more cells as doublets.
-  With well-separated cell lines, the LL gap between a true singlet and the
-  second-best line is usually large (> 100), so the default `2.0` is already
-  conservative. Inspect the score distribution first.
-- **`no_match_threshold`**: the mean log-likelihood per position for a perfect
-  assignment is typically around −1.0 to −1.5. Cells that score much worse
-  (e.g. < −3.0) are likely poor quality or from a line not in the DB. Adjust
-  based on the `mean_ll_per_pos` column in the output.
+  With well-separated cell lines the LL gap for a true singlet is usually
+  large (> 100), so `2.0` is conservative. Inspect `mean_ll_per_pos` first.
+- **`no_match_threshold`**: typical mean LL per position for a good assignment
+  is −1.0 to −1.5. Cells scoring much worse (e.g. < −3.0) are likely poor
+  quality or from a line not in the DB.
 
 ## Exploring results in the notebook
 

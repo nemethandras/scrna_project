@@ -104,6 +104,12 @@ db_path: results/variants.db
 # demux_run_id: unique label for this demux run (stored in DB if load_db: true).
 # load_db: whether to write cell assignments back into the DB.
 demux:
+  # Explicit BAM and barcodes paths (flat CellRanger or STARsolo output).
+  # If set, these take priority over cellranger_dir.
+  bam: null
+  barcodes: null
+  # CellRanger output directory — auto-constructs paths from outs/ subdirectory.
+  # Use this OR bam+barcodes, not both.
   cellranger_dir: null
   run_ids: []
   demux_run_id: null
