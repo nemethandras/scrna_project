@@ -211,10 +211,18 @@ def run_scrna(args):
             f' --run-ids {run_ids_str}'
             f' --output {donor_matches}'
         ),
+        f'echo "--- merging results ---"',
+        f'python scripts/merge_demux.py'
+        f' --vireo-dir {vireo_dir}'
+        f' --matches {donor_matches}'
+        f' --scorer {output}'
+        f' --output results/demux/{demux_run_id}/final_assignments.tsv'
+        f' --min-concordance {args.min_concordance}',
         f'echo "Done: $(date)"',
         f'echo "Binomial assignments : {output}"',
         f'echo "Vireo assignments    : {vireo_dir}/donor_ids.tsv"',
         f'echo "Vireo→DB matches     : {donor_matches}"',
+        f'echo "Final merged output  : results/demux/{demux_run_id}/final_assignments.tsv"',
     ]
 
     script = "\n".join(script_lines) + "\n"
@@ -358,6 +366,10 @@ examples:
     scrna.add_argument(
         "--n-donors", type=int, default=None, metavar="N",
         help="number of donors for Vireo (default: auto-detect)",
+    )
+    scrna.add_argument(
+        "--min-concordance", type=float, default=0.9, metavar="F",
+        help="min genotype concordance to accept a Vireo donor→DB match (default: 0.9)",
     )
 
     # ── Common options ─────────────────────────────────────────────────────

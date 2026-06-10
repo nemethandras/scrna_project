@@ -92,10 +92,12 @@ rule normalize_snp_panel:
         mkdir -p $(dirname {output.vcf})
         bcftools annotate \
             --rename-chrs {input.conv} \
+            {input.vcf} \
+            2> {log} \
+        | bcftools sort \
             --output-type z \
             -o {output.vcf} \
-            {input.vcf} \
-            2> {log}
+            2>> {log}
         tabix -p vcf {output.vcf} 2>> {log}
         """
 
@@ -546,5 +548,38 @@ rule match_vireo_donors:
             --run-ids         {params.run_ids} \
             --output          {output} \
             --min-positions   {params.min_pos} \
+            2> {log}
+        """
+
+
+# ─────────────────────────────────────────────
+# merge_demux — combine Vireo assignments,
+# donor→DB matches, and binomial scorer output
+# into a single final assignments table.
+# Cells with a DB match get a cell line name;
+# unmatched donors keep their Vireo label.
+#
+# Run explicitly:
+#   snakemake results/demux/<demux_run_id>/final_assignments.tsv
+# ─────────────────────────────────────────────
+rule merge_demux:
+    input:
+        vireo   = "results/demux/{demux_run_id}/vireo",
+        matches = "results/demux/{demux_run_id}/donor_matches.tsv",
+        scorer  = "results/demux/{demux_run_id}/assignments.tsv"
+    output:
+        "results/demux/{demux_run_id}/final_assignments.tsv"
+    log:
+        "logs/demux/{demux_run_id}/merge_demux.log"
+    params:
+        min_concordance = lambda _: config.get("demux", {}).get("min_concordance", 0.9)
+    shell:
+        """
+        python scripts/merge_demux.py \
+            --vireo-dir        {input.vireo} \
+            --matches          {input.matches} \
+            --scorer           {input.scorer} \
+            --output           {output} \
+            --min-concordance  {params.min_concordance} \
             2> {log}
         """
