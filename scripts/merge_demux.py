@@ -130,8 +130,18 @@ def main():
             prob_dbl = vrow.get("prob_doublet", "")
 
             if donor == "doublet":
-                cell_line  = "doublet"
-                source     = "doublet"
+                # Resolve constituent donors to cell line names where possible
+                best_doublet = vrow.get("best_doublet", "")
+                if best_doublet:
+                    parts = [p.strip() for p in best_doublet.split(",")]
+                    resolved = []
+                    for part in parts:
+                        m = donor_map.get(part)
+                        resolved.append(m[0] if m else f"vireo:{part}")
+                    cell_line = "doublet:" + "+".join(resolved)
+                else:
+                    cell_line = "doublet"
+                source      = "doublet"
                 concordance = ""
                 n_pos       = ""
                 counts["doublet"] += 1
