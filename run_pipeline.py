@@ -181,8 +181,12 @@ def run_scrna(args):
             f'echo "Using existing cellsnp dir: {cellsnp_dir}"'
         )
 
+    vireo_dir    = f"results/demux/{demux_run_id}/vireo"
+    donor_matches = f"results/demux/{demux_run_id}/donor_matches.tsv"
+    n_flag       = f"-N {args.n_donors}" if args.n_donors else ""
+
     script_lines += [
-        f'echo "--- demux ---"',
+        f'echo "--- demux (binomial scorer) ---"',
         (
             f'python scripts/demux.py'
             f' --cellsnp-dir {cellsnp_dir}'
@@ -196,8 +200,21 @@ def run_scrna(args):
             f' --no-match-threshold {args.no_match_threshold}'
             f' {load_db_flag}'
         ),
+        f'echo "--- vireo (genotype-free clustering) ---"',
+        f'mkdir -p {vireo_dir}',
+        f'vireo -c {cellsnp_dir} {n_flag} -o {vireo_dir} --randSeed 42',
+        f'echo "--- matching Vireo donors to DB ---"',
+        (
+            f'python scripts/match_vireo.py'
+            f' --vireo-dir {vireo_dir}'
+            f' --db {db}'
+            f' --run-ids {run_ids_str}'
+            f' --output {donor_matches}'
+        ),
         f'echo "Done: $(date)"',
-        f'echo "Output: {output}"',
+        f'echo "Binomial assignments : {output}"',
+        f'echo "Vireo assignments    : {vireo_dir}/donor_ids.tsv"',
+        f'echo "Vireo→DB matches     : {donor_matches}"',
     ]
 
     script = "\n".join(script_lines) + "\n"
@@ -337,6 +354,10 @@ examples:
     scrna.add_argument(
         "--snps-vcf", metavar="PATH", default=DEFAULT_SNPS_VCF,
         help=f"common SNP panel VCF for cellsnp-lite (default: {DEFAULT_SNPS_VCF})",
+    )
+    scrna.add_argument(
+        "--n-donors", type=int, default=None, metavar="N",
+        help="number of donors for Vireo (default: auto-detect)",
     )
 
     # ── Common options ─────────────────────────────────────────────────────

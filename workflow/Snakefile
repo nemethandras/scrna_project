@@ -480,3 +480,71 @@ rule demux_cells:
             {params.load_db_flag} \
             2> {log}
         """
+
+
+# ─────────────────────────────────────────────
+# vireo_demux — genotype-free donor clustering.
+# Runs Vireo on the cellSNP output to separate
+# cells into donors without needing a reference.
+# Produces GT_donors.vcf.gz with inferred donor
+# genotypes for subsequent DB matching.
+#
+# Run explicitly:
+#   snakemake results/demux/<demux_run_id>/vireo
+# ─────────────────────────────────────────────
+rule vireo_demux:
+    input:
+        cellsnp = "results/demux/{demux_run_id}/cellsnp"
+    output:
+        directory("results/demux/{demux_run_id}/vireo")
+    threads:
+        lambda _: config.get("demux", {}).get("threads", 8)
+    log:
+        "logs/demux/{demux_run_id}/vireo.log"
+    params:
+        n_flag = lambda _: (
+            f"-N {config['demux']['n_donors']}"
+            if config.get("demux", {}).get("n_donors") else ""
+        )
+    shell:
+        """
+        mkdir -p {output}
+        vireo \
+            -c {input.cellsnp} \
+            {params.n_flag} \
+            -o {output} \
+            --randSeed 42 \
+            2> {log}
+        """
+
+
+# ─────────────────────────────────────────────
+# match_vireo_donors — match Vireo's inferred
+# donor genotypes (GT_donors.vcf.gz) against
+# reference genotypes in the DB to identify
+# which cell line each anonymous donor is.
+#
+# Run explicitly:
+#   snakemake results/demux/<demux_run_id>/donor_matches.tsv
+# ─────────────────────────────────────────────
+rule match_vireo_donors:
+    input:
+        vireo = "results/demux/{demux_run_id}/vireo"
+    output:
+        "results/demux/{demux_run_id}/donor_matches.tsv"
+    log:
+        "logs/demux/{demux_run_id}/match_vireo.log"
+    params:
+        db      = config["db_path"],
+        run_ids = lambda _: " ".join(_demux_cfg_opt("run_ids") or []) or "all",
+        min_pos = lambda _: config.get("demux", {}).get("min_positions", 100),
+    shell:
+        """
+        python scripts/match_vireo.py \
+            --vireo-dir       {input.vireo} \
+            --db              {params.db} \
+            --run-ids         {params.run_ids} \
+            --output          {output} \
+            --min-positions   {params.min_pos} \
+            2> {log}
+        """

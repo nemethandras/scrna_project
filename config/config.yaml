@@ -115,6 +115,8 @@ demux:
   demux_run_id: null
   load_db: false
   threads: 8
+  # Number of donors for Vireo. If null, Vireo will attempt to estimate it.
+  n_donors: null
   # Scoring thresholds
   min_depth: 10      # min reads at a position in a cell to use it for scoring
   min_positions: 50  # min positions with coverage before attempting assignment
