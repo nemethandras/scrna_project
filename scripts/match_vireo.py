@@ -33,6 +33,11 @@ def parse_args():
                    help="run_ids to compare against, or 'all' (default: all)")
     p.add_argument("--output",     required=True,
                    help="output TSV path for donor→cell_line matches")
+    p.add_argument("--min-concordance", type=float, default=0.4, metavar="F",
+                   help="min ALT-recall to accept a match (default: 0.4)")
+    p.add_argument("--min-gap", type=float, default=0.15, metavar="F",
+                   help="min gap between best and second-best concordance to accept a match "
+                        "(default: 0.15)")
     p.add_argument("--min-positions", type=int, default=50,
                    help="min shared positions to attempt matching (default: 100)")
     return p.parse_args()
@@ -178,11 +183,12 @@ def compute_concordance(vireo_dosage, db_dosage):
     return concordance, n_shared
 
 
-def write_matches(donors, run_ids, concordance, n_shared, output_path, min_positions):
+def write_matches(donors, run_ids, concordance, n_shared, output_path,
+                  min_positions, min_concordance, min_gap):
     with open(output_path, "w") as f:
         f.write(
             "vireo_donor\tassigned_line\tconcordance\tn_positions"
-            "\tsecond_line\tsecond_concordance\n"
+            "\tsecond_line\tsecond_concordance\tgap\n"
         )
         for di, donor in enumerate(donors):
             row = concordance[di]
@@ -191,7 +197,7 @@ def write_matches(donors, run_ids, concordance, n_shared, output_path, min_posit
             valid = ~np.isnan(row) & (ns >= min_positions)
 
             if not valid.any():
-                f.write(f"{donor}\tno_match\t\t0\t\t\n")
+                f.write(f"{donor}\tno_match\t\t0\t\t\t\n")
                 continue
 
             order    = np.argsort(row[valid])[::-1]
@@ -202,15 +208,24 @@ def write_matches(donors, run_ids, concordance, n_shared, output_path, min_posit
             best_run = run_ids[best_ri]
 
             second_run = ""
-            second_c   = ""
+            second_c   = np.nan
             if len(order) > 1:
                 second_ri  = vi[order[1]]
                 second_run = run_ids[second_ri]
-                second_c   = f"{float(row[second_ri]):.4f}"
+                second_c   = float(row[second_ri])
 
+            gap = best_c - second_c if not np.isnan(second_c) else best_c
+
+            # Reject if below absolute threshold or gap is too small
+            if best_c < min_concordance or gap < min_gap:
+                assigned = "no_match"
+            else:
+                assigned = best_run
+
+            second_c_str = f"{second_c:.4f}" if not np.isnan(second_c) else ""
             f.write(
-                f"{donor}\t{best_run}\t{best_c:.4f}\t{best_n}"
-                f"\t{second_run}\t{second_c}\n"
+                f"{donor}\t{assigned}\t{best_c:.4f}\t{best_n}"
+                f"\t{second_run}\t{second_c_str}\t{gap:.4f}\n"
             )
 
 
@@ -241,7 +256,8 @@ def main():
         print(f"  {donor:<12}  {run_ids[best_ri]:<35}  concordance={row[best_ri]:.3f}  n={ns[best_ri]:,}")
 
     print(f"\nWriting {args.output}...")
-    write_matches(donors, run_ids, concordance, n_shared, args.output, args.min_positions)
+    write_matches(donors, run_ids, concordance, n_shared, args.output,
+                  args.min_positions, args.min_concordance, args.min_gap)
     print("Done.\n")
 
 

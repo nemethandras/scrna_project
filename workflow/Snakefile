@@ -343,7 +343,11 @@ rule load_to_database:
         run_id     = RUN_ID,
         db         = config["db_path"],
         reference  = config["reference_genome"],
-        sequencing = config["sequencing"]
+        sequencing = config["sequencing"],
+        cell_line_flag = (
+            f"--cell-line {config['cell_line']}"
+            if config.get("cell_line") else ""
+        )
     shell:
         """
         python scripts/load_to_db.py \
@@ -355,6 +359,7 @@ rule load_to_database:
             --db         {params.db} \
             --reference  {params.reference} \
             --sequencing {params.sequencing} \
+            {params.cell_line_flag} \
             2> {log}
         """
 
@@ -538,8 +543,10 @@ rule match_vireo_donors:
         "logs/demux/{demux_run_id}/match_vireo.log"
     params:
         db      = config["db_path"],
-        run_ids = lambda _: " ".join(_demux_cfg_opt("run_ids") or []) or "all",
-        min_pos = lambda _: config.get("demux", {}).get("min_positions", 100),
+        run_ids  = lambda _: " ".join(_demux_cfg_opt("run_ids") or []) or "all",
+        min_pos  = lambda _: config.get("demux", {}).get("min_positions", 50),
+        min_conc = lambda _: config.get("demux", {}).get("min_concordance", 0.4),
+        min_gap  = lambda _: config.get("demux", {}).get("min_gap", 0.15),
     shell:
         """
         python scripts/match_vireo.py \
@@ -548,6 +555,8 @@ rule match_vireo_donors:
             --run-ids         {params.run_ids} \
             --output          {output} \
             --min-positions   {params.min_pos} \
+            --min-concordance {params.min_conc} \
+            --min-gap         {params.min_gap} \
             2> {log}
         """
 

@@ -2,6 +2,7 @@
 """Command-line wrapper for the scRNA-seq variant calling pipeline."""
 
 import argparse
+import csv
 import os
 import subprocess
 import sys
@@ -12,6 +13,23 @@ DEFAULT_GTF        = "data/reference/genes.gtf"
 DEFAULT_STAR_INDEX = "data/reference/star_index_hg38_oh99"
 DEFAULT_SNPS_VCF   = "data/reference/genome1K.hg38.common_snps.vcf.gz"
 DEFAULT_DB         = "results/variants.db"
+DEFAULT_CELL_LINE_MAP = "data/cell_line_map.csv"
+
+
+def lookup_cell_line(map_path, sample_id):
+    """Return cell line name for a sample_id from a CSV/TSV map, or None."""
+    if not map_path or not os.path.exists(map_path):
+        return None
+    try:
+        with open(map_path) as f:
+            dialect = csv.Sniffer().sniff(f.read(2048))
+            f.seek(0)
+            for row in csv.DictReader(f, dialect=dialect):
+                if row.get("Run") == sample_id or row.get("sample_id") == sample_id:
+                    return row.get("cell_line") or row.get("cell_line_name") or None
+    except Exception:
+        pass
+    return None
 
 
 # ─────────────────────────────────────────────
@@ -20,6 +38,9 @@ DEFAULT_DB         = "results/variants.db"
 
 def build_snakemake_cmd(run_id, sample, args, fastq_dir=None):
     fastq_dir = fastq_dir or f"data/{sample}"
+    cell_line = lookup_cell_line(
+        getattr(args, "cell_line_map", None) or DEFAULT_CELL_LINE_MAP, sample
+    )
     config_overrides = [
         f"run_id={run_id}",
         f"samples=[{sample}]",
@@ -31,6 +52,8 @@ def build_snakemake_cmd(run_id, sample, args, fastq_dir=None):
         f"sjdb_overhang={args.sjdb_overhang}",
         f"genome_sa_index_nbases={args.genome_sa_index_nbases}",
     ]
+    if cell_line:
+        config_overrides.append(f"cell_line={cell_line}")
     if args.db:
         config_overrides.append(f"db_path={args.db}")
     if args.no_db:
@@ -210,6 +233,8 @@ def run_scrna(args):
             f' --db {db}'
             f' --run-ids {run_ids_str}'
             f' --output {donor_matches}'
+            f' --min-concordance {args.min_concordance}'
+            f' --min-gap {args.min_gap}'
         ),
         f'echo "--- merging results ---"',
         f'python scripts/merge_demux.py'
@@ -316,6 +341,11 @@ examples:
         "--no-db", action="store_true",
         help="skip the load_to_database step",
     )
+    bulk.add_argument(
+        "--cell-line-map", metavar="PATH", default=None,
+        help=f"CSV/TSV mapping sample_id → cell_line for automatic DB labelling "
+             f"(default: {DEFAULT_CELL_LINE_MAP} if it exists)",
+    )
 
     # ── scRNA args ─────────────────────────────────────────────────────────
     scrna = parser.add_argument_group("scrna mode")
@@ -368,8 +398,12 @@ examples:
         help="number of donors for Vireo (default: auto-detect)",
     )
     scrna.add_argument(
-        "--min-concordance", type=float, default=0.9, metavar="F",
-        help="min genotype concordance to accept a Vireo donor→DB match (default: 0.9)",
+        "--min-concordance", type=float, default=0.4, metavar="F",
+        help="min ALT-recall to accept a Vireo donor→DB match (default: 0.4)",
+    )
+    scrna.add_argument(
+        "--min-gap", type=float, default=0.15, metavar="F",
+        help="best match must beat second-best by at least this (default: 0.15)",
     )
 
     # ── Common options ─────────────────────────────────────────────────────

@@ -119,7 +119,8 @@ demux:
   n_donors: null
   # Minimum genotype concordance to accept a Vireo donor→DB match.
   # Donors below this threshold are labelled "vireo:<donor_id>" in the final output.
-  min_concordance: 0.3
+  min_concordance: 0.4   # min ALT-recall for a Vireo→DB match
+  min_gap: 0.15          # best must beat second-best by at least this
   # Scoring thresholds
   min_depth: 10      # min reads at a position in a cell to use it for scoring
   min_positions: 50  # min positions with coverage before attempting assignment

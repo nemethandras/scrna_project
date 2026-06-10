@@ -43,6 +43,9 @@ def parse_args():
     p.add_argument("--reference", default="data/reference/genome.fa")
     p.add_argument("--sequencing", default="single")
     p.add_argument("--star-log",  default=None, help="path to STAR Log.final.out")
+    p.add_argument("--cell-line",  default=None,
+                   help="cell line name to use as the sample name in the DB "
+                        "(default: same as --sample)")
     p.add_argument("--force",        action="store_true",
                    help="overwrite existing data for this run_id instead of erroring")
     p.add_argument("--external-vcf", action="store_true",
@@ -112,10 +115,16 @@ def get_version(cmd):
 def init_sqlite(db_path):
     """Create tables if they don't exist."""
     conn = sqlite3.connect(db_path)
+    # Migrate: add cell_line column if this is an older DB that lacks it
+    existing_cols = {r[1] for r in conn.execute("PRAGMA table_info(samples)").fetchall()}
+    if "cell_line" not in existing_cols:
+        conn.execute("ALTER TABLE samples ADD COLUMN cell_line TEXT")
+        conn.commit()
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS samples (
             sample_id    INTEGER PRIMARY KEY AUTOINCREMENT,
             name         TEXT UNIQUE,
+            cell_line    TEXT,
             date_added   TEXT
         );
 
@@ -358,6 +367,12 @@ def main():
     sample_id = conn.execute(
         "SELECT sample_id FROM samples WHERE name=?", (args.sample,)
     ).fetchone()[0]
+    # Set cell_line if provided (stored separately, does not replace name)
+    if args.cell_line:
+        conn.execute(
+            "UPDATE samples SET cell_line=? WHERE sample_id=?",
+            (args.cell_line, sample_id)
+        )
 
     conn.execute("""
         INSERT INTO runs
