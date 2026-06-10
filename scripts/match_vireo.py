@@ -33,7 +33,7 @@ def parse_args():
                    help="run_ids to compare against, or 'all' (default: all)")
     p.add_argument("--output",     required=True,
                    help="output TSV path for donor→cell_line matches")
-    p.add_argument("--min-positions", type=int, default=100,
+    p.add_argument("--min-positions", type=int, default=50,
                    help="min shared positions to attempt matching (default: 100)")
     return p.parse_args()
 
@@ -49,12 +49,13 @@ def load_donor_genotypes(vireo_dir):
     dosage    : int array (n_positions, n_donors) — 0/1/2, -1 = no call
     """
     d = Path(vireo_dir)
-    vcf_path = d / "GT_donors.vcf.gz"
-    if not vcf_path.exists():
-        vcf_path = d / "GT_donors.vcf"
-    if not vcf_path.exists():
+    for candidate in ["GT_donors.vireo.vcf.gz", "GT_donors.vcf.gz", "GT_donors.vcf"]:
+        vcf_path = d / candidate
+        if vcf_path.exists():
+            break
+    else:
         raise SystemExit(
-            f"\nERROR: GT_donors.vcf.gz not found in {vireo_dir}\n"
+            f"\nERROR: GT_donors VCF not found in {vireo_dir}\n"
             "Re-run Vireo without -d (genotype-free mode) to produce inferred donor genotypes.\n"
         )
 
@@ -134,14 +135,20 @@ def load_db_genotypes(db_path, run_ids, positions):
 
 def compute_concordance(vireo_dosage, db_dosage):
     """
-    Compute genotype concordance between each Vireo donor and each DB reference.
+    Compute ALT-recall between each Vireo donor and each DB reference.
 
-    Only positions where both have a valid call (≥ 0) are compared.
+    Metric: among positions where the DB has a non-ref call (0/1 or 1/1),
+    what fraction does Vireo also call as non-ref?
+
+    This is robust to the old DB samples that only contain ALT calls
+    (no 0/0 entries), and handles sparse scRNA-seq coverage — Vireo will
+    default to 0/0 at uncovered positions, but the signal comes from the
+    positions where it does infer a variant.
 
     Returns
     -------
-    concordance : float array (n_donors, n_runs)
-    n_shared    : int array   (n_donors, n_runs)
+    concordance : float array (n_donors, n_runs)  — ALT recall
+    n_shared    : int array   (n_donors, n_runs)  — DB ALT positions used
     """
     n_pos, n_donors = vireo_dosage.shape
     n_runs = db_dosage.shape[1]
@@ -150,19 +157,22 @@ def compute_concordance(vireo_dosage, db_dosage):
     n_shared    = np.zeros((n_donors, n_runs), dtype=np.int32)
 
     for di in range(n_donors):
-        vd = vireo_dosage[:, di]          # (n_pos,)
+        vd = vireo_dosage[:, di]
         v_valid = vd >= 0
 
         for ri in range(n_runs):
-            rd = db_dosage[:, ri]         # (n_pos,)
+            rd = db_dosage[:, ri]
             r_valid = rd >= 0
 
-            shared = v_valid & r_valid
+            # Focus on positions where the DB has a non-ref call
+            db_alt = r_valid & (rd > 0)
+            shared = v_valid & db_alt
             n = int(shared.sum())
             if n == 0:
                 continue
-            matches = int((vd[shared] == rd[shared]).sum())
-            concordance[di, ri] = matches / n
+            # Fraction of DB ALT positions where Vireo also calls non-ref
+            vireo_also_alt = int((vd[shared] > 0).sum())
+            concordance[di, ri] = vireo_also_alt / n
             n_shared[di, ri]    = n
 
     return concordance, n_shared

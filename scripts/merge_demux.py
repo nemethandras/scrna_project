@@ -39,7 +39,7 @@ def parse_args():
                    help="output TSV path for final merged assignments")
     p.add_argument("--scorer",          default=None,
                    help="assignments.tsv from demux.py (optional, adds comparison column)")
-    p.add_argument("--min-concordance", type=float, default=0.9, metavar="F",
+    p.add_argument("--min-concordance", type=float, default=0.3, metavar="F",
                    help="min concordance to accept a DB match (default: 0.9)")
     return p.parse_args()
 
