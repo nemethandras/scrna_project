@@ -53,27 +53,49 @@ After cell lines are characterised and loaded into the database, CellRanger
 BAMs from pooled experiments can be demultiplexed against those reference
 genotypes.
 
+The scRNA demux pipeline runs four steps:
+
 ```mermaid
 flowchart TD
     CR([CellRanger BAM\n+ barcodes.tsv.gz])
     DB[(SQLite\nvariants.db)]
     SNP2([common SNP panel\ngenome1K VCF])
 
-    CR  --> P[cellsnp_pileup\nper-cell AD/DP at SNP positions]
+    CR   --> P[cellsnp-lite\nper-cell AD/DP at SNP positions]
     SNP2 --> P
-    DB  --> S[demux_cells\nbinomial log-likelihood scorer]
-    P   --> S
 
-    S --> T[assignments.tsv\nbarcode · cell_line · status · score]
-    S -->|optional| DB2[(cell_assignments\ntable in SQLite)]
+    P --> S[demux.py\nbinomial log-likelihood scorer]
+    DB --> S
+    P --> V[Vireo\ngenotype-free donor clustering]
+    V --> M[match_vireo.py\ncompare inferred donor genotypes\nagainst DB references]
+    DB --> M
+
+    S --> G[merge_demux.py\ncombine Vireo + DB match + scorer]
+    V --> G
+    M --> G
+
+    S --> A[assignments.tsv\nbinomial scorer output]
+    G --> F[final_assignments.tsv\nbarcode · cell_line · confidence]
 
     style DB fill:#2d6a4f,color:#fff
-    style DB2 fill:#2d6a4f,color:#fff
+    style F fill:#457b9d,color:#fff
 ```
 
-Each cell barcode is assigned to the best-matching cell line, or flagged as
-`doublet` / `no_match`. No reference genotypes are inferred from the data —
-all reference profiles must already be in the database.
+**Step 1 — cellsnp-lite**: pileup at common SNP positions, one row per cell barcode.
+
+**Step 2 — demux.py** (binomial scorer): scores each cell against every reference
+profile in the DB using log-likelihoods. Fast, reference-dependent — all target
+cell lines must already be in the DB.
+
+**Step 3 — Vireo**: genotype-free donor clustering. Groups cells into donor
+clusters without any prior knowledge of the genotypes. Produces an inferred
+genotype per cluster (anonymous donor0, donor1, …).
+
+**Step 4 — match_vireo.py + merge_demux.py**: compares each Vireo donor's inferred
+genotype against the DB references (ALT-recall concordance). Optionally enforces
+one-to-one donor↔cell-line matching (`--unique`, Hungarian algorithm) to prevent
+the same reference from being claimed by multiple donors. The final merged table
+combines Vireo identity, DB concordance, and binomial scorer output.
 
 ## Database structure
 
@@ -94,6 +116,7 @@ erDiagram
     samples {
         INTEGER sample_id PK
         TEXT    name
+        TEXT    cell_line
         TEXT    date_added
     }
     runs {
@@ -191,8 +214,9 @@ erDiagram
 - [samtools](http://www.htslib.org/)
 - [bcftools](http://www.htslib.org/) (with tabix)
 - [cellSNP-lite](https://cellsnp-lite.readthedocs.io) — per-cell pileup for demultiplexing
+- [vireoSNP](https://vireosnp.readthedocs.io) — genotype-free donor clustering for pooled scRNA-seq
 - [cyvcf2](https://github.com/brentp/cyvcf2)
-- [scipy](https://scipy.org/) — sparse matrix operations in demux scorer
+- [scipy](https://scipy.org/) — sparse matrix operations and Hungarian matching
 - [numpy](https://numpy.org/)
 - [grist_api](https://github.com/gristlabs/grist-api)
 - [python-dotenv](https://github.com/theskumar/python-dotenv)
@@ -211,9 +235,13 @@ scrna_project/
 ├── scripts/
 │   ├── load_to_db.py            # loads results into SQLite and Grist
 │   ├── demux.py                 # cell line demultiplexer (binomial scorer)
+│   ├── match_vireo.py           # match Vireo donor genotypes against DB references
+│   ├── merge_demux.py           # merge Vireo + DB-match + scorer into final output
 │   ├── validate_vcf.py          # hg38/hg19 detection for external VCFs
 │   ├── match_vcf.py             # match an unknown VCF against the database
 │   └── test_grist.py            # inspect Grist table schema
+├── data/
+│   └── cell_line_map.csv        # Run (SRR accession) → cell_line mapping for auto-labelling
 ├── data/
 │   ├── reference/               # genome FASTA, GTF, STAR index, and SNP panel
 │   └── <sample>/                # one folder per sample: <sample>_1.fastq [_2.fastq]
@@ -452,8 +480,11 @@ against reference genotypes in the DB).
 --barcodes PATH         barcodes.tsv.gz matching the BAM (required with --bam)
 --cellsnp-dir PATH      use an existing cellsnp-lite output dir, skip cellsnp step
 --demux-run-id ID       unique label for this demux run (required)
---run-ids ID ...        run_ids in the DB to score against; default: all
---load-db               write cell assignments back into the SQLite database
+--run-ids ID ...        run_ids in the DB to compare against; default: all
+--load-db               write binomial scorer assignments to the SQLite database
+--n-donors N            number of donors to cluster in Vireo (default: auto-detect)
+--min-concordance F     min ALT-recall for a Vireo donor→DB match (default: 0.4)
+--min-gap F             concordance gap between best and second-best to accept a match (default: 0.15)
 --min-depth N           min reads at a position in a cell to use it (default: 1)
 --min-positions N       min covered positions to attempt assignment (default: 10)
 --doublet-gap F         min LL gap between top two lines for a singlet call (default: 2.0)
@@ -465,28 +496,26 @@ against reference genotypes in the DB).
 ### scRNA examples
 
 ```bash
-# from a CellRanger BAM — runs cellsnp-lite then demux, detaches in background
+# from a CellRanger BAM — full pipeline: cellsnp → demux → vireo → match → merge
 source .env && python run_pipeline.py --mode scrna \
     --bam data/Pool_ctr/possorted_genome_bam.bam \
     --barcodes data/Pool_ctr/barcodes.tsv.gz \
-    --demux-run-id pool_ctr_001
+    --demux-run-id pool_ctr_001 \
+    --n-donors 7
 
-# from an existing cellsnp-lite output — skip cellsnp, run demux only
-source .env && python run_pipeline.py --mode scrna \
-    --cellsnp-dir data/Pool_ctr/cellsnp \
-    --demux-run-id pool_ctr_001
-
-# score against specific run_ids only
+# from an existing cellsnp-lite output — skip cellsnp step
 source .env && python run_pipeline.py --mode scrna \
     --cellsnp-dir data/Pool_ctr/cellsnp \
     --demux-run-id pool_ctr_001 \
-    --run-ids RKO_hg38 HCT116_hg38 HT29_hg38
+    --n-donors 7
 
-# write assignments back to the DB and watch live
+# restrict Vireo matching to only the expected cell lines in the pool
 source .env && python run_pipeline.py --mode scrna \
     --cellsnp-dir data/Pool_ctr/cellsnp \
     --demux-run-id pool_ctr_001 \
-    --load-db --foreground
+    --n-donors 7 \
+    --run-ids SRR5071686_hg38 SRR5071667_hg38 SRR5071672_hg38 \
+              SRR5071669_hg38 SRR5071657_hg38 SRR5071662_hg38 SRR5071677_hg38
 ```
 
 Follow progress:
@@ -499,28 +528,112 @@ tail -f logs/demux/pool_ctr_001.log
 > only fails if *no* references are found at all. Leave `--run-ids` unset (the
 > default) to automatically score against every run in the DB.
 
-### Output
+> **Restricting to pool composition:** when you know which cell lines are in
+> the pool, pass their run_ids with `--run-ids`. This prevents spurious matches
+> from unrelated lines in the DB and makes the gap threshold more meaningful.
 
-`results/demux/<demux_run_id>/assignments.tsv`:
+### match_vireo.py options
 
+Run directly for custom matching (e.g. re-run with different thresholds without
+re-running Vireo):
+
+```bash
+conda run -n scrna python scripts/match_vireo.py \
+    --vireo-dir results/demux/pool_ctr_001/vireo \
+    --db results/variants.db \
+    --run-ids SRR5071686_hg38 SRR5071667_hg38 SRR5071672_hg38 \
+    --output results/demux/pool_ctr_001/donor_matches.tsv \
+    --min-concordance 0.4 \
+    --min-gap 0.15 \
+    --unique
 ```
-barcode          assigned_line  status     score     second_score  n_positions  doublet  mean_ll_per_pos
-ACGTACGT-1       RKO_hg38       assigned   -4821.2   -7203.5       3847         False    -1.253
-TTGCAACG-1       doublet:RKO+HCT116  doublet  -6102.1  -6201.8    3211         True     -1.900
-CGTAGCTA-1       no_match       no_match                           12           False
-```
 
-**Status values:**
+**`--unique`** enforces one-to-one donor↔reference matching via the Hungarian
+algorithm. Without it, multiple donors can match the same reference (which can
+happen when a reference cell line has many variants shared with others). Use
+`--unique` whenever the composition of the pool is known (i.e. pass `--run-ids`
+with exactly the expected cell lines).
 
-| Status | Meaning |
+The concordance metric is **ALT-recall**: among positions where the DB reference
+has a non-ref call, what fraction does the Vireo donor also call non-ref? This
+is robust to the old DB samples that only contain ALT calls (no 0/0 entries).
+
+### Output files
+
+| File | Description |
 |---|---|
-| `assigned` | Confidently assigned to one cell line |
-| `doublet` | Top two lines score within `doublet_gap` of each other |
-| `no_match` | Mean log-likelihood per position below `no_match_threshold` — no line fits |
-| `insufficient_coverage` | Fewer than `min_positions` positions with reads — not enough data |
+| `results/demux/<id>/assignments.tsv` | Binomial scorer: barcode → cell_line, status, score, n_positions |
+| `results/demux/<id>/vireo/donor_ids.tsv` | Vireo per-cell donor assignment and probabilities |
+| `results/demux/<id>/vireo/GT_donors.vireo.vcf.gz` | Vireo inferred donor genotypes |
+| `results/demux/<id>/donor_matches.tsv` | Vireo donor → DB cell line concordance table |
+| `results/demux/<id>/final_assignments.tsv` | **Main output** — merged Vireo + DB + scorer per cell |
 
-If `--load-db` is set, assignments are also written to the `cell_assignments`
-table in SQLite, keyed by `demux_run_id` + `cell_barcode`.
+`final_assignments.tsv` columns:
+
+```
+barcode           cell_line  source    vireo_donor  prob_max  prob_doublet  concordance  n_positions  match_confidence  scorer_assignment  scorer_status  agreement
+ACGTACGT-1        RKO        db_match  donor2       1.0       1e-52         0.8242       9932         high              RKO_hg38           assigned       TRUE
+TTGCAACG-1        HCT116     db_match  donor6       1.0       1e-18         0.7053       13464        high              HCT116_hg38        assigned       TRUE
+CGTAGCTA-1        DLD1       db_match  donor4       0.98      2e-08         0.3444       14935        low               DLD1_hg38          assigned       TRUE
+AAGTCCAA-1        doublet:RKO+HCT116  doublet  donor2   0.61   0.39         ...
+TTACGGCC-1        unassigned  unassigned  unassigned  ...
+```
+
+**`match_confidence` values:**
+
+| Value | Meaning |
+|---|---|
+| `high` | concordance ≥ `min_concordance` and gap ≥ `min_gap` — clear match |
+| `low` | concordance below threshold or gap too small — best available match from 1:1 assignment; treat with caution |
+| `no_match` | no reference with sufficient shared positions |
+| `no_data` | fewer than `min_positions` shared positions |
+
+**`source` values:**
+
+| Value | Meaning |
+|---|---|
+| `db_match` | Vireo donor was matched to a DB reference |
+| `vireo_only` | Vireo donor had no DB match — labelled `vireo:<donor_id>` |
+| `doublet` | Vireo flagged this cell as a doublet; constituent donors resolved to cell line names where possible |
+| `unassigned` | Vireo could not assign this cell to any donor |
+
+**`agreement`**: `TRUE` when the binomial scorer and Vireo-based assignment agree on the same cell line.
+
+### Cell line auto-labelling
+
+When running bulk mode, the pipeline looks up cell line names from
+`data/cell_line_map.csv` (mapped from `Run` column to `cell_line` column) and
+passes them to `load_to_db.py --cell-line`. The cell line name is stored in the
+`samples.cell_line` column in SQLite — it does **not** replace the original
+sample name (stored in `samples.name`).
+
+To backfill cell line labels for existing DB entries:
+
+```python
+import sqlite3, csv
+conn = sqlite3.connect("results/variants.db")
+with open("data/cell_line_map.csv") as f:
+    for row in csv.DictReader(f):
+        r = conn.execute("SELECT sample_id FROM samples WHERE name=?", (row["Run"],)).fetchone()
+        if r:
+            conn.execute("UPDATE samples SET cell_line=? WHERE sample_id=?", (row["cell_line"], r[0]))
+conn.commit()
+```
+
+### Tuning Vireo matching thresholds
+
+- **`--min-concordance`**: the minimum ALT-recall to accept a Vireo→DB match.
+  A value of `0.4` is a good starting point. Donors from small cell clusters
+  (< 500 cells) will have noisy Vireo genotypes and may score 0.30–0.40 even
+  for the correct match. Use `--unique` to still assign them rather than
+  reporting `no_match`.
+- **`--min-gap`**: the minimum margin between best and second-best concordance.
+  A gap of `0.15` prevents ambiguous assignments when the DB contains many
+  similar cell lines. If you have passed only the expected pool members via
+  `--run-ids`, a lower gap (`0.10`) is acceptable.
+- **Small clusters**: donors with < 500 cells will typically receive
+  `confidence=low`. The assignment is still the best available given the data
+  — flag it in downstream analysis rather than discarding it.
 
 ### Advanced: Snakemake rules
 
@@ -542,6 +655,9 @@ demux:
   demux_run_id: pool_ctr_001
   load_db: false
   threads: 8
+  n_donors: null        # Vireo donor count; null = auto-detect
+  min_concordance: 0.4  # min ALT-recall for Vireo→DB match
+  min_gap: 0.15         # concordance gap required for a confident match
   min_depth: 1
   min_positions: 10
   doublet_gap: 2.0
@@ -650,7 +766,10 @@ against the full hg38 genome.
 | `results/<run_id>/vcf/<sample>.genotyped.vcf` | Depth- and quality-filtered genotypes (0/0, 0/1, 1/1) |
 | `results/<run_id>/db/<sample>.loaded` | Touch file confirming db load completed |
 | `results/demux/<demux_run_id>/cellsnp/` | cellSNP-lite per-cell pileup directory |
-| `results/demux/<demux_run_id>/assignments.tsv` | Cell barcode → cell line assignments |
+| `results/demux/<demux_run_id>/vireo/` | Vireo donor clustering outputs |
+| `results/demux/<demux_run_id>/assignments.tsv` | Binomial scorer: barcode → cell line |
+| `results/demux/<demux_run_id>/donor_matches.tsv` | Vireo donor → DB reference concordance |
+| `results/demux/<demux_run_id>/final_assignments.tsv` | Merged final cell line assignments |
 | `results/variants.db` | SQLite database with all runs, genotype calls, and cell assignments |
 
 ## Tuning parameters

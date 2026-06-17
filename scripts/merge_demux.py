@@ -46,18 +46,21 @@ def parse_args():
 
 def load_donor_matches(matches_path, min_concordance):
     """
-    Returns dict: vireo_donor → cell_line (or None if no confident match).
+    Returns dict: vireo_donor → (cell_line, concordance, n_positions, confidence) or None.
+    Uses the cell_line column (friendly name) when available, else assigned_line (run_id).
     """
     mapping = {}
     with open(matches_path) as f:
         reader = csv.DictReader(f, delimiter="\t")
         for row in reader:
-            donor = row["vireo_donor"]
-            line  = row["assigned_line"]
-            conc  = float(row["concordance"]) if row["concordance"] else 0.0
-            n     = int(row["n_positions"])   if row["n_positions"]  else 0
-            if line != "no_match" and conc >= min_concordance and n > 0:
-                mapping[donor] = (line, conc, n)
+            donor      = row["vireo_donor"]
+            run_id     = row["assigned_line"]
+            cell_line  = row.get("cell_line", "").strip() or run_id
+            conc       = float(row["concordance"]) if row["concordance"] else 0.0
+            n          = int(row["n_positions"])   if row["n_positions"]  else 0
+            confidence = row.get("confidence", "").strip()
+            if run_id != "no_match" and n > 0 and conc >= min_concordance:
+                mapping[donor] = (cell_line, conc, n, confidence)
             else:
                 mapping[donor] = None
     return mapping
@@ -103,8 +106,8 @@ def main():
           f"(concordance >= {args.min_concordance})")
     for donor, match in sorted(donor_map.items()):
         if match:
-            line, conc, n = match
-            print(f"    {donor:<12} → {line}  (concordance={conc:.3f}, n={n:,})")
+            line, conc, n, conf = match
+            print(f"    {donor:<12} → {line}  (concordance={conc:.3f}, n={n:,}, confidence={conf})")
         else:
             print(f"    {donor:<12} → no_match")
 
@@ -118,7 +121,7 @@ def main():
         header = [
             "barcode", "cell_line", "source",
             "vireo_donor", "vireo_prob_max", "vireo_prob_doublet",
-            "concordance", "n_positions",
+            "concordance", "n_positions", "match_confidence",
         ]
         if has_scorer:
             header += ["scorer_assignment", "scorer_status", "agreement"]
@@ -144,29 +147,33 @@ def main():
                 source      = "doublet"
                 concordance = ""
                 n_pos       = ""
+                confidence  = ""
                 counts["doublet"] += 1
             elif donor == "unassigned":
-                cell_line  = "unassigned"
-                source     = "unassigned"
+                cell_line   = "unassigned"
+                source      = "unassigned"
                 concordance = ""
                 n_pos       = ""
+                confidence  = ""
                 counts["unassigned"] += 1
             else:
                 match = donor_map.get(donor)
                 if match:
-                    cell_line, conc, n = match
+                    cell_line, conc, n, conf = match
                     concordance = f"{conc:.4f}"
                     n_pos       = str(n)
+                    confidence  = conf
                     source      = "db_match"
                     counts["db_match"] += 1
                 else:
                     cell_line   = f"vireo:{donor}"
                     concordance = ""
                     n_pos       = ""
+                    confidence  = ""
                     source      = "vireo_only"
                     counts["vireo_only"] += 1
 
-            row = [barcode, cell_line, source, donor, prob_max, prob_dbl, concordance, n_pos]
+            row = [barcode, cell_line, source, donor, prob_max, prob_dbl, concordance, n_pos, confidence]
 
             if has_scorer:
                 srow       = scorer.get(barcode, {})

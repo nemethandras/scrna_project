@@ -19,6 +19,7 @@ import sqlite3
 import numpy as np
 from pathlib import Path
 from cyvcf2 import VCF
+from scipy.optimize import linear_sum_assignment
 
 
 def parse_args():
@@ -40,6 +41,9 @@ def parse_args():
                         "(default: 0.15)")
     p.add_argument("--min-positions", type=int, default=50,
                    help="min shared positions to attempt matching (default: 100)")
+    p.add_argument("--unique", action="store_true",
+                   help="enforce one-to-one donor↔reference matching via Hungarian algorithm "
+                        "(prevents multiple donors from matching the same cell line)")
     return p.parse_args()
 
 
@@ -85,6 +89,25 @@ def load_donor_genotypes(vireo_dir):
     dosage = np.array(rows, dtype=np.int8)  # (n_positions, n_donors)
     print(f"  {len(donors)} Vireo donors, {len(positions):,} positions")
     return donors, positions, dosage
+
+
+def load_cell_line_names(db_path, run_ids):
+    """Return dict run_id → cell_line (falls back to sample name, then run_id)."""
+    conn = sqlite3.connect(db_path)
+    names = {}
+    for run_id in run_ids:
+        row = conn.execute("""
+            SELECT s.cell_line, s.name
+            FROM   runs r JOIN samples s ON r.sample_id = s.sample_id
+            WHERE  r.run_id = ?
+        """, (run_id,)).fetchone()
+        if row:
+            cl, sname = row
+            names[run_id] = cl if cl else sname
+        else:
+            names[run_id] = run_id
+    conn.close()
+    return names
 
 
 def load_db_genotypes(db_path, run_ids, positions):
@@ -183,12 +206,47 @@ def compute_concordance(vireo_dosage, db_dosage):
     return concordance, n_shared
 
 
+def unique_match(donors, run_ids, concordance, n_shared, min_positions):
+    """
+    Hungarian 1:1 matching: each reference can be assigned to at most one donor.
+    Returns assigned_ri[di] = reference index for each donor, or -1 if no valid positions.
+    """
+    n_donors = len(donors)
+    n_refs   = len(run_ids)
+
+    # Mask positions below min_positions as -inf so they can't be chosen
+    cost = concordance.copy()
+    invalid = np.isnan(cost) | (n_shared < min_positions)
+    cost[invalid] = 0.0  # 0 = worst (we maximize)
+
+    # linear_sum_assignment minimizes; negate to maximize concordance
+    if n_donors <= n_refs:
+        row_ind, col_ind = linear_sum_assignment(-cost)
+    else:
+        # More donors than refs: transpose and solve
+        row_ind, col_ind = linear_sum_assignment(-cost.T)
+        row_ind, col_ind = col_ind, row_ind
+
+    assigned_ri = np.full(n_donors, -1, dtype=int)
+    for di, ri in zip(row_ind, col_ind):
+        if not invalid[di, ri]:
+            assigned_ri[di] = ri
+    return assigned_ri
+
+
 def write_matches(donors, run_ids, concordance, n_shared, output_path,
-                  min_positions, min_concordance, min_gap):
+                  min_positions, min_concordance, min_gap, use_unique=False,
+                  cell_line_names=None):
+    # Compute 1:1 assignments if requested
+    unique_ri = unique_match(donors, run_ids, concordance, n_shared, min_positions) \
+                if use_unique else None
+
+    cl = cell_line_names or {}
+
     with open(output_path, "w") as f:
         f.write(
-            "vireo_donor\tassigned_line\tconcordance\tn_positions"
-            "\tsecond_line\tsecond_concordance\tgap\n"
+            "vireo_donor\tassigned_line\tcell_line\tconcordance\tn_positions"
+            "\tsecond_line\tsecond_concordance\tgap\tconfidence\n"
         )
         for di, donor in enumerate(donors):
             row = concordance[di]
@@ -197,35 +255,53 @@ def write_matches(donors, run_ids, concordance, n_shared, output_path,
             valid = ~np.isnan(row) & (ns >= min_positions)
 
             if not valid.any():
-                f.write(f"{donor}\tno_match\t\t0\t\t\t\n")
+                f.write(f"{donor}\tno_match\t\t\t0\t\t\t\tno_data\n")
                 continue
 
-            order    = np.argsort(row[valid])[::-1]
-            vi       = np.where(valid)[0]
-            best_ri  = vi[order[0]]
+            # In unique mode use the Hungarian-assigned reference, else pick best globally
+            if use_unique and unique_ri is not None:
+                best_ri = unique_ri[di]
+                if best_ri == -1:
+                    f.write(f"{donor}\tno_match\t\t0\t\t\t\tno_data\n")
+                    continue
+            else:
+                order   = np.argsort(row[valid])[::-1]
+                vi      = np.where(valid)[0]
+                best_ri = vi[order[0]]
+
             best_c   = float(row[best_ri])
             best_n   = int(ns[best_ri])
             best_run = run_ids[best_ri]
 
-            second_run = ""
-            second_c   = np.nan
-            if len(order) > 1:
-                second_ri  = vi[order[1]]
+            # Second-best: best valid index that is NOT best_ri
+            other_valid = np.where(valid & (np.arange(len(run_ids)) != best_ri))[0]
+            if len(other_valid):
+                second_ri  = other_valid[np.argmax(row[other_valid])]
                 second_run = run_ids[second_ri]
                 second_c   = float(row[second_ri])
+            else:
+                second_run = ""
+                second_c   = np.nan
 
             gap = best_c - second_c if not np.isnan(second_c) else best_c
 
-            # Reject if below absolute threshold or gap is too small
-            if best_c < min_concordance or gap < min_gap:
-                assigned = "no_match"
+            # Determine assignment and confidence
+            if best_c >= min_concordance and gap >= min_gap:
+                assigned   = best_run
+                confidence = "high"
+            elif best_c >= min_concordance * 0.7:
+                # Below threshold but still best available — flag as low_confidence
+                assigned   = best_run
+                confidence = "low"
             else:
-                assigned = best_run
+                assigned   = "no_match"
+                confidence = "no_match"
 
             second_c_str = f"{second_c:.4f}" if not np.isnan(second_c) else ""
+            assigned_cl  = cl.get(assigned, assigned) if assigned != "no_match" else ""
             f.write(
-                f"{donor}\t{assigned}\t{best_c:.4f}\t{best_n}"
-                f"\t{second_run}\t{second_c_str}\t{gap:.4f}\n"
+                f"{donor}\t{assigned}\t{assigned_cl}\t{best_c:.4f}\t{best_n}"
+                f"\t{second_run}\t{second_c_str}\t{gap:.4f}\t{confidence}\n"
             )
 
 
@@ -255,9 +331,15 @@ def main():
         best_ri = int(np.nanargmax(row * valid))
         print(f"  {donor:<12}  {run_ids[best_ri]:<35}  concordance={row[best_ri]:.3f}  n={ns[best_ri]:,}")
 
+    cell_line_names = load_cell_line_names(args.db, run_ids)
+
+    if args.unique:
+        print("Using 1:1 Hungarian matching (--unique)")
+
     print(f"\nWriting {args.output}...")
     write_matches(donors, run_ids, concordance, n_shared, args.output,
-                  args.min_positions, args.min_concordance, args.min_gap)
+                  args.min_positions, args.min_concordance, args.min_gap,
+                  use_unique=args.unique, cell_line_names=cell_line_names)
     print("Done.\n")
 
 
