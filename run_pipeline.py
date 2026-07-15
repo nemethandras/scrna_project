@@ -235,6 +235,7 @@ def run_scrna(args):
             f' --output {donor_matches}'
             f' --min-concordance {args.min_concordance}'
             f' --min-gap {args.min_gap}'
+            + (' --unique' if args.unique else '')
         ),
         f'echo "--- merging results ---"',
         f'python scripts/merge_demux.py'
@@ -404,6 +405,10 @@ examples:
     scrna.add_argument(
         "--min-gap", type=float, default=0.15, metavar="F",
         help="best match must beat second-best by at least this (default: 0.15)",
+    )
+    scrna.add_argument(
+        "--unique", action="store_true",
+        help="enforce 1:1 donor↔reference matching via Hungarian algorithm (recommended when --run-ids lists exactly the pool members)",
     )
 
     # ── Common options ─────────────────────────────────────────────────────
