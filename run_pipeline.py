@@ -394,8 +394,8 @@ examples:
         help="min read depth at a position in a cell (default: 1 for scRNA)",
     )
     scrna.add_argument(
-        "--min-positions", type=int, default=10, metavar="N",
-        help="min covered positions to attempt assignment (default: 10 for scRNA)",
+        "--min-positions", type=int, default=200, metavar="N",
+        help="min covered positions to attempt assignment (default: 200)",
     )
     scrna.add_argument(
         "--doublet-gap", type=float, default=2.0, metavar="F",
@@ -414,12 +414,12 @@ examples:
         help="number of donors for Vireo (default: auto-detect)",
     )
     scrna.add_argument(
-        "--min-concordance", type=float, default=0.4, metavar="F",
-        help="min ALT-recall to accept a Vireo donor→DB match (default: 0.4)",
+        "--min-concordance", type=float, default=0.65, metavar="F",
+        help="min genotype concordance to accept a Vireo donor→DB match (default: 0.65)",
     )
     scrna.add_argument(
-        "--min-gap", type=float, default=0.15, metavar="F",
-        help="best match must beat second-best by at least this (default: 0.15)",
+        "--min-gap", type=float, default=0.10, metavar="F",
+        help="best match must beat second-best by at least this (default: 0.10)",
     )
     scrna.add_argument(
         "--unique", action="store_true",

@@ -92,7 +92,7 @@ clusters without any prior knowledge of the genotypes. Produces an inferred
 genotype per cluster (anonymous donor0, donor1, …).
 
 **Step 4 — match_vireo.py + merge_demux.py**: compares each Vireo donor's inferred
-genotype against the DB references (ALT-recall concordance). Optionally enforces
+genotype against the DB references (full genotype concordance at common SNP positions). Optionally enforces
 one-to-one donor↔cell-line matching (`--unique`, Hungarian algorithm) to prevent
 the same reference from being claimed by multiple donors. The final merged table
 combines Vireo identity, DB concordance, and binomial scorer output.
@@ -483,10 +483,10 @@ against reference genotypes in the DB).
 --run-ids ID ...        run_ids in the DB to compare against; default: all
 --load-db               write binomial scorer assignments to the SQLite database
 --n-donors N            number of donors to cluster in Vireo (default: auto-detect)
---min-concordance F     min ALT-recall for a Vireo donor→DB match (default: 0.4)
---min-gap F             concordance gap between best and second-best to accept a match (default: 0.15)
+--min-concordance F     min genotype concordance for a Vireo donor→DB match (default: 0.65)
+--min-gap F             concordance gap between best and second-best to accept a match (default: 0.10)
 --min-depth N           min reads at a position in a cell to use it (default: 1)
---min-positions N       min covered positions to attempt assignment (default: 10)
+--min-positions N       min covered positions to attempt assignment (default: 200)
 --doublet-gap F         min LL gap between top two lines for a singlet call (default: 2.0)
 --no-match-threshold F  mean LL per position below which → no_match (default: -0.5)
 --snps-vcf PATH         common SNP panel for cellsnp-lite (default: data/reference/genome1K.hg38.common_snps.vcf.gz)
@@ -543,8 +543,8 @@ conda run -n scrna python scripts/match_vireo.py \
     --db results/variants.db \
     --run-ids SRR5071686_hg38 SRR5071667_hg38 SRR5071672_hg38 \
     --output results/demux/pool_ctr_001/donor_matches.tsv \
-    --min-concordance 0.4 \
-    --min-gap 0.15 \
+    --min-concordance 0.65 \
+    --min-gap 0.10 \
     --unique
 ```
 
@@ -554,9 +554,10 @@ happen when a reference cell line has many variants shared with others). Use
 `--unique` whenever the composition of the pool is known (i.e. pass `--run-ids`
 with exactly the expected cell lines).
 
-The concordance metric is **ALT-recall**: among positions where the DB reference
-has a non-ref call, what fraction does the Vireo donor also call non-ref? This
-is robust to the old DB samples that only contain ALT calls (no 0/0 entries).
+The concordance metric is **full genotype concordance**: at all common SNP positions
+where both the Vireo donor and the DB reference have a valid call, what fraction
+have matching dosages (0/0=0/0, 0/1=0/1, 1/1=1/1)? This is variant-count-agnostic
+— a reference sample with fewer ALT calls is not artificially favoured.
 
 ### Output files
 
@@ -628,26 +629,27 @@ by comparing those inferred genotypes against the reference genotypes stored in 
 
 **What is being compared**
 
-For each (Vireo donor, DB reference) pair, the script looks at the positions where the
-DB reference has a non-ref call (heterozygous 0/1 or homozygous 1/1). At each such
-position, it asks: did Vireo also call this donor as non-ref?
+For each (Vireo donor, DB reference) pair, the script compares full genotypes at every
+common SNP position where both have a valid call. Genotype dosages are 0 (0/0), 1 (0/1),
+or 2 (1/1); a missing/uncovered position gets dosage −1 and is excluded from the
+comparison.
 
-**The ALT-recall metric**
+**The genotype concordance metric**
 
 ```
-                  positions where DB is ALT  AND  Vireo calls ALT
-concordance  =  ─────────────────────────────────────────────────
-                  positions where DB is ALT  AND  Vireo has any call
+                  positions where BOTH have a valid call  AND  dosages match (0=0, 1=1, 2=2)
+concordance  =  ───────────────────────────────────────────────────────────────────────────────
+                  positions where BOTH have a valid call
 ```
 
-This is the fraction of the reference cell line's known variant positions that Vireo
-independently rediscovers in the pooled scRNA-seq data. Using only DB-ALT positions as
-the denominator makes it robust to two practical constraints:
+The pipeline genotypes all WES/WGS samples at every position in the 1000G common-SNP
+panel (AF > 5%) using `bcftools mpileup -T`, retaining 0/0 (homozygous-ref) calls as
+well as ALT calls. Vireo likewise outputs full genotypes at those same positions.
+The intersection is typically tens of thousands of sites per comparison.
 
-- Older DB entries only contain ALT calls (no 0/0 rows) — a denominator based on shared
-  positions would fail for them.
-- scRNA-seq coverage is sparse: Vireo defaults to 0/0 at uncovered positions, so a
-  genome-wide concordance metric would be artificially low everywhere.
+This metric is **variant-count-agnostic**: a reference sample with fewer ALT calls is no
+longer artificially favoured. Positions where the true match has ALT and a wrong reference
+has 0/0 count as mismatches, clearly distinguishing the wrong cell line.
 
 **Confidence tiers**
 
@@ -656,7 +658,7 @@ the denominator makes it robust to two practical constraints:
 | `high` | concordance ≥ `min_concordance` **and** gap between best and second-best ≥ `min_gap` |
 | `low` | concordance ≥ 0.7 × `min_concordance` — best available match but below the confidence bar |
 | `no_match` | concordance too low at all references |
-| `no_data` | fewer than `min_positions` DB-ALT positions shared with this donor |
+| `no_data` | fewer than `min_positions` shared positions with this donor |
 
 **1:1 Hungarian matching (`--unique`)**
 
@@ -680,15 +682,13 @@ WHERE name = 'unknown_pool_ctr_v4_donor3';
 
 ### Tuning Vireo matching thresholds
 
-- **`--min-concordance`**: the minimum ALT-recall to accept a Vireo→DB match.
-  A value of `0.4` is a good starting point. Donors from small cell clusters
-  (< 500 cells) will have noisy Vireo genotypes and may score 0.30–0.40 even
-  for the correct match. Use `--unique` to still assign them rather than
-  reporting `no_match`.
+- **`--min-concordance`**: the minimum genotype concordance to accept a Vireo→DB match.
+  The default of `0.65` is calibrated for the current DB state where many reference runs store only ALT calls (no 0/0). For those runs the metric is equivalent to ALT-recall and true matches score 0.65–0.85. Runs processed with the current pipeline (which stores 0/0 calls) produce concordance values of 0.90+ for true matches, so raise the threshold to 0.85 once those populate the DB.
+  Donors from small cell clusters (< 500 cells)
+  may score lower due to noisy Vireo genotypes; use `--unique` to still assign them.
 - **`--min-gap`**: the minimum margin between best and second-best concordance.
-  A gap of `0.15` prevents ambiguous assignments when the DB contains many
-  similar cell lines. If you have passed only the expected pool members via
-  `--run-ids`, a lower gap (`0.10`) is acceptable.
+  A gap of `0.10` is appropriate for the genotype-concordance metric; increase to
+  `0.15` if you have very similar cell lines in the DB.
 - **Small clusters**: donors with < 500 cells will typically receive
   `confidence=low`. The assignment is still the best available given the data
   — flag it in downstream analysis rather than discarding it.
@@ -714,10 +714,10 @@ demux:
   load_db: false
   threads: 8
   n_donors: null        # Vireo donor count; null = auto-detect
-  min_concordance: 0.4  # min ALT-recall for Vireo→DB match
-  min_gap: 0.15         # concordance gap required for a confident match
+  min_concordance: 0.65  # min genotype concordance for Vireo→DB match
+  min_gap: 0.10          # concordance gap required for a confident match
   min_depth: 1
-  min_positions: 10
+  min_positions: 200
   doublet_gap: 2.0
   no_match_threshold: -0.5
 ```
@@ -840,7 +840,7 @@ against the full hg38 genome.
 | `filters.min_qual` | 30 | Minimum QUAL score for ALT calls (0/0 positions are exempt) |
 | `filters.min_depth` | 10 | Minimum read depth at any genotyped position |
 | `demux.min_depth` | 10 | Minimum depth in a cell at a position to use it for scoring |
-| `demux.min_positions` | 50 | Minimum covered positions to attempt cell assignment |
+| `demux.min_positions` | 200 | Minimum covered positions to attempt cell assignment |
 | `demux.doublet_gap` | 2.0 | Log-likelihood gap below which a cell is called a doublet |
 | `demux.no_match_threshold` | −0.5 | Mean LL per position below which a cell gets no_match |
 | `db_path` | `results/variants.db` | SQLite database file location |

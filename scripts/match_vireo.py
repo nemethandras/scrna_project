@@ -34,13 +34,13 @@ def parse_args():
                    help="run_ids to compare against, or 'all' (default: all)")
     p.add_argument("--output",     required=True,
                    help="output TSV path for donor→cell_line matches")
-    p.add_argument("--min-concordance", type=float, default=0.4, metavar="F",
-                   help="min ALT-recall to accept a match (default: 0.4)")
-    p.add_argument("--min-gap", type=float, default=0.15, metavar="F",
+    p.add_argument("--min-concordance", type=float, default=0.65, metavar="F",
+                   help="min genotype concordance to accept a match (default: 0.65)")
+    p.add_argument("--min-gap", type=float, default=0.10, metavar="F",
                    help="min gap between best and second-best concordance to accept a match "
-                        "(default: 0.15)")
-    p.add_argument("--min-positions", type=int, default=50,
-                   help="min shared positions to attempt matching (default: 100)")
+                        "(default: 0.10)")
+    p.add_argument("--min-positions", type=int, default=200,
+                   help="min shared positions to attempt matching (default: 200)")
     p.add_argument("--unique", action="store_true",
                    help="enforce one-to-one donor↔reference matching via Hungarian algorithm "
                         "(prevents multiple donors from matching the same cell line)")
@@ -163,20 +163,27 @@ def load_db_genotypes(db_path, run_ids, positions):
 
 def compute_concordance(vireo_dosage, db_dosage):
     """
-    Compute ALT-recall between each Vireo donor and each DB reference.
+    Compute binary ALT-presence concordance between each Vireo donor and each DB reference.
 
-    Metric: among positions where the DB has a non-ref call (0/1 or 1/1),
-    what fraction does Vireo also call as non-ref?
+    Metric: among all positions where BOTH the Vireo donor and the DB reference have a
+    valid call (dosage ≥ 0), what fraction agree on whether there is ANY alt allele?
+    That is: (dosage > 0) in Vireo == (dosage > 0) in DB.
 
-    This is robust to the old DB samples that only contain ALT calls
-    (no 0/0 entries), and handles sparse scRNA-seq coverage — Vireo will
-    default to 0/0 at uncovered positions, but the signal comes from the
-    positions where it does infer a variant.
+    This is variant-count-agnostic: the denominator includes 0/0 positions (for DB
+    entries that store them), so a reference with fewer variants is no longer
+    artificially preferred. At the same time, ignoring the het/hom distinction
+    (0/1 vs 1/1 both count as "ALT present") avoids penalising Vireo's inference noise
+    from sparse scRNA coverage, where truly homozygous-alt positions are often called
+    heterozygous due to read-count variability.
+
+    Graceful degradation: for DB entries that only store ALT calls (no 0/0 rows, e.g.
+    samples loaded under the old variant-only pipeline), the shared positions are purely
+    ALT positions and the metric reduces to the original ALT-recall.
 
     Returns
     -------
-    concordance : float array (n_donors, n_runs)  — ALT recall
-    n_shared    : int array   (n_donors, n_runs)  — DB ALT positions used
+    concordance : float array (n_donors, n_runs)  — binary ALT-presence concordance
+    n_shared    : int array   (n_donors, n_runs)  — positions with valid calls in both
     """
     n_pos, n_donors = vireo_dosage.shape
     n_runs = db_dosage.shape[1]
@@ -192,15 +199,16 @@ def compute_concordance(vireo_dosage, db_dosage):
             rd = db_dosage[:, ri]
             r_valid = rd >= 0
 
-            # Focus on positions where the DB has a non-ref call
-            db_alt = r_valid & (rd > 0)
-            shared = v_valid & db_alt
+            # All positions where both have a valid call
+            shared = v_valid & r_valid
             n = int(shared.sum())
             if n == 0:
                 continue
-            # Fraction of DB ALT positions where Vireo also calls non-ref
-            vireo_also_alt = int((vd[shared] > 0).sum())
-            concordance[di, ri] = vireo_also_alt / n
+            # Binary agreement: does each position carry an ALT allele?
+            v_has_alt = vd[shared] > 0
+            r_has_alt = rd[shared] > 0
+            matching = int((v_has_alt == r_has_alt).sum())
+            concordance[di, ri] = matching / n
             n_shared[di, ri]    = n
 
     return concordance, n_shared
