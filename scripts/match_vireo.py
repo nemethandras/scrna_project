@@ -262,7 +262,7 @@ def write_matches(donors, run_ids, concordance, n_shared, output_path,
             if use_unique and unique_ri is not None:
                 best_ri = unique_ri[di]
                 if best_ri == -1:
-                    f.write(f"{donor}\tno_match\t\t0\t\t\t\tno_data\n")
+                    f.write(f"{donor}\tno_match\t\t\t0\t\t\t\tno_data\n")
                     continue
             else:
                 order   = np.argsort(row[valid])[::-1]

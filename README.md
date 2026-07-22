@@ -620,6 +620,64 @@ with open("data/cell_line_map.csv") as f:
 conn.commit()
 ```
 
+### How genotype matching works
+
+After Vireo clusters cells into anonymous donors (donor0, donor1, …) and infers a
+consensus genotype for each, `match_vireo.py` identifies which cell line each donor is
+by comparing those inferred genotypes against the reference genotypes stored in the DB.
+
+**What is being compared**
+
+For each (Vireo donor, DB reference) pair, the script looks at the positions where the
+DB reference has a non-ref call (heterozygous 0/1 or homozygous 1/1). At each such
+position, it asks: did Vireo also call this donor as non-ref?
+
+**The ALT-recall metric**
+
+```
+                  positions where DB is ALT  AND  Vireo calls ALT
+concordance  =  ─────────────────────────────────────────────────
+                  positions where DB is ALT  AND  Vireo has any call
+```
+
+This is the fraction of the reference cell line's known variant positions that Vireo
+independently rediscovers in the pooled scRNA-seq data. Using only DB-ALT positions as
+the denominator makes it robust to two practical constraints:
+
+- Older DB entries only contain ALT calls (no 0/0 rows) — a denominator based on shared
+  positions would fail for them.
+- scRNA-seq coverage is sparse: Vireo defaults to 0/0 at uncovered positions, so a
+  genome-wide concordance metric would be artificially low everywhere.
+
+**Confidence tiers**
+
+| Tier | Condition |
+|---|---|
+| `high` | concordance ≥ `min_concordance` **and** gap between best and second-best ≥ `min_gap` |
+| `low` | concordance ≥ 0.7 × `min_concordance` — best available match but below the confidence bar |
+| `no_match` | concordance too low at all references |
+| `no_data` | fewer than `min_positions` DB-ALT positions shared with this donor |
+
+**1:1 Hungarian matching (`--unique`)**
+
+Without `--unique`, two donors can independently pick the same reference as their best
+match (common when a reference cell line is genetically similar to several others).
+`--unique` solves a maximum-weight bipartite matching (Hungarian algorithm) so each
+reference is assigned to at most one donor — use it whenever the pool composition is known.
+
+**Adding unmatched donors to the DB**
+
+If a donor cannot be matched (confidence `no_match` or `no_data`), it likely represents
+a cell line not yet in the DB. Pass `--add-unmatched` to `run_pipeline.py` (or run
+`scripts/add_unmatched_donors.py` directly) to insert the donor's inferred genotype as a
+new reference sample (`unknown_<run_id>_<donor_id>`, `cell_line = NULL`). Once you
+identify the cell line, update the label:
+
+```sql
+UPDATE samples SET cell_line = 'IS3'
+WHERE name = 'unknown_pool_ctr_v4_donor3';
+```
+
 ### Tuning Vireo matching thresholds
 
 - **`--min-concordance`**: the minimum ALT-recall to accept a Vireo→DB match.

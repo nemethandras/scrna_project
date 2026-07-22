@@ -244,6 +244,21 @@ def run_scrna(args):
         f' --scorer {output}'
         f' --output results/demux/{demux_run_id}/final_assignments.tsv'
         f' --min-concordance {args.min_concordance}',
+    ]
+
+    if args.add_unmatched:
+        script_lines += [
+            f'echo "--- adding unmatched donors to DB ---"',
+            (
+                f'python scripts/add_unmatched_donors.py'
+                f' --vireo-dir {vireo_dir}'
+                f' --matches {donor_matches}'
+                f' --db {db}'
+                f' --demux-run-id {demux_run_id}'
+            ),
+        ]
+
+    script_lines += [
         f'echo "Done: $(date)"',
         f'echo "Binomial assignments : {output}"',
         f'echo "Vireo assignments    : {vireo_dir}/donor_ids.tsv"',
@@ -409,6 +424,10 @@ examples:
     scrna.add_argument(
         "--unique", action="store_true",
         help="enforce 1:1 donor↔reference matching via Hungarian algorithm (recommended when --run-ids lists exactly the pool members)",
+    )
+    scrna.add_argument(
+        "--add-unmatched", action="store_true",
+        help="add Vireo donors with no DB match to the DB as new unlabelled samples (run add_unmatched_donors.py as final step)",
     )
 
     # ── Common options ─────────────────────────────────────────────────────
