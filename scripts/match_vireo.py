@@ -299,8 +299,15 @@ def write_matches(donors, run_ids, concordance, n_shared, output_path,
 
             gap = best_c - second_c if not np.isnan(second_c) else best_c
 
-            # Determine assignment and confidence
-            if best_c >= min_concordance and gap >= min_gap:
+            # Determine assignment and confidence.
+            # In --unique mode the Hungarian algorithm may assign a donor to a
+            # suboptimal reference (its global best was taken). A negative gap
+            # signals this: the "second_concordance" exceeds the assigned
+            # concordance. Treat forced assignments as no_match.
+            if gap < 0:
+                assigned   = "no_match"
+                confidence = "no_match"
+            elif best_c >= min_concordance and gap >= min_gap:
                 assigned   = best_run
                 confidence = "high"
             elif best_c >= min_concordance * 0.7:

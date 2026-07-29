@@ -414,8 +414,8 @@ examples:
         help="number of donors for Vireo (default: auto-detect)",
     )
     scrna.add_argument(
-        "--min-concordance", type=float, default=0.65, metavar="F",
-        help="min genotype concordance to accept a Vireo donor→DB match (default: 0.65)",
+        "--min-concordance", type=float, default=0.80, metavar="F",
+        help="min genotype concordance to accept a Vireo donor→DB match (default: 0.80)",
     )
     scrna.add_argument(
         "--min-gap", type=float, default=0.10, metavar="F",

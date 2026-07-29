@@ -483,7 +483,7 @@ against reference genotypes in the DB).
 --run-ids ID ...        run_ids in the DB to compare against; default: all
 --load-db               write binomial scorer assignments to the SQLite database
 --n-donors N            number of donors to cluster in Vireo (default: auto-detect)
---min-concordance F     min genotype concordance for a Vireo donor→DB match (default: 0.65)
+--min-concordance F     min genotype concordance for a Vireo donor→DB match (default: 0.80)
 --min-gap F             concordance gap between best and second-best to accept a match (default: 0.10)
 --min-depth N           min reads at a position in a cell to use it (default: 1)
 --min-positions N       min covered positions to attempt assignment (default: 200)
@@ -543,7 +543,7 @@ conda run -n scrna python scripts/match_vireo.py \
     --db results/variants.db \
     --run-ids SRR5071686_hg38 SRR5071667_hg38 SRR5071672_hg38 \
     --output results/demux/pool_ctr_001/donor_matches.tsv \
-    --min-concordance 0.65 \
+    --min-concordance 0.80 \
     --min-gap 0.10 \
     --unique
 ```
@@ -768,7 +768,7 @@ demux:
   load_db: false
   threads: 8
   n_donors: null        # Vireo donor count; null = auto-detect
-  min_concordance: 0.65  # min genotype concordance for Vireo→DB match
+  min_concordance: 0.80  # min genotype concordance for Vireo→DB match
   min_gap: 0.10          # concordance gap required for a confident match
   min_depth: 1
   min_positions: 200
