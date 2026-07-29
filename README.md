@@ -233,13 +233,15 @@ scrna_project/
 │   ├── Snakefile
 │   └── chr_name_conv.txt        # bare → chr-prefixed chrom name mapping
 ├── scripts/
-│   ├── load_to_db.py            # loads results into SQLite and Grist
-│   ├── demux.py                 # cell line demultiplexer (binomial scorer)
-│   ├── match_vireo.py           # match Vireo donor genotypes against DB references
-│   ├── merge_demux.py           # merge Vireo + DB-match + scorer into final output
-│   ├── validate_vcf.py          # hg38/hg19 detection for external VCFs
-│   ├── match_vcf.py             # match an unknown VCF against the database
-│   └── test_grist.py            # inspect Grist table schema
+│   ├── load_to_db.py                # loads results into SQLite and Grist
+│   ├── demux.py                     # cell line demultiplexer (binomial scorer)
+│   ├── match_vireo.py               # match Vireo donor genotypes against DB references
+│   ├── merge_demux.py               # merge Vireo + DB-match + scorer into final output
+│   ├── backfill_panel_genotypes.py  # retroactively add 0/0 calls for legacy runs
+│   ├── add_unmatched_donors.py      # insert unmatched Vireo donors as new DB references
+│   ├── validate_vcf.py              # hg38/hg19 detection for external VCFs
+│   ├── match_vcf.py                 # match an unknown VCF against the database
+│   └── test_grist.py                # inspect Grist table schema
 ├── data/
 │   └── cell_line_map.csv        # Run (SRR accession) → cell_line mapping for auto-labelling
 ├── data/
@@ -490,6 +492,7 @@ against reference genotypes in the DB).
 --doublet-gap F         min LL gap between top two lines for a singlet call (default: 2.0)
 --no-match-threshold F  mean LL per position below which → no_match (default: -0.5)
 --snps-vcf PATH         common SNP panel for cellsnp-lite (default: data/reference/genome1K.hg38.common_snps.vcf.gz)
+--add-unmatched         insert unmatched Vireo donors into the DB as new unlabelled samples after matching
 --cores N               threads for cellsnp-lite (default: 16)
 ```
 
@@ -554,10 +557,12 @@ happen when a reference cell line has many variants shared with others). Use
 `--unique` whenever the composition of the pool is known (i.e. pass `--run-ids`
 with exactly the expected cell lines).
 
-The concordance metric is **full genotype concordance**: at all common SNP positions
-where both the Vireo donor and the DB reference have a valid call, what fraction
-have matching dosages (0/0=0/0, 0/1=0/1, 1/1=1/1)? This is variant-count-agnostic
-— a reference sample with fewer ALT calls is not artificially favoured.
+The concordance metric is **binary ALT-presence concordance**: at all common SNP
+positions where both the Vireo donor and the DB reference have a valid call, what
+fraction agree on whether any ALT allele is present (dosage > 0)? Both 0/1 and 1/1
+count as "ALT present"; the het/hom distinction is ignored because Vireo frequently
+miscalls homozygous-alt sites as heterozygous at low per-cell depth. See the
+"How genotype matching works" section below for full details.
 
 ### Output files
 
@@ -808,9 +813,12 @@ conda run -n scrna pip install ipywidgets plotly jupyterlab
 
 | Section | What it shows |
 |---|---|
-| Cross-sample QC overview | Mapping rate (with 85% threshold), genotyped position counts, raw vs filtered comparison for every run |
-| Per-run deep-dive | Dropdown to select a run — depth distribution, QUAL scores, variant types (SNP/INDEL), allele frequency spectrum, variants per chromosome, depth vs QUAL scatter |
-| Cross-sample comparison | Two dropdowns — variant overlap, Jaccard similarity, side-by-side depth and allele frequency plots |
+| Cross-sample QC overview | Mapping rate (with 85% threshold) and filtered variant counts for every run |
+| Per-run deep-dive | Dropdown — depth distribution, QUAL scores, variant types, allele frequency spectrum, variants per chromosome, depth vs QUAL scatter |
+| Cross-sample comparison | Two dropdowns — variant overlap, Jaccard similarity, side-by-side depth and AF plots |
+| Variant overlap heatmap | Jaccard and containment similarity between all cell lines in the DB |
+| scRNA demultiplexing results | Dropdown — cell composition bar (DB-matched + unmatched vireo donors), doublet pair heatmap, Vireo probability violins, concordance & gap bars per donor |
+| Concordance profiles | Full concordance matrix plots — best/worst donor bar charts (Plot A), per-donor horizontal profiles for best/median/worst donors (Plot B), concordance score distribution histograms (Plot C) |
 | STAR alignment QC | Annotated splice % and % reads too short per sample (read from STAR log files) |
 | Raw SQL explorer | Text box to run any query against the database |
 
