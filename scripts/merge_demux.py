@@ -39,8 +39,10 @@ def parse_args():
                    help="output TSV path for final merged assignments")
     p.add_argument("--scorer",          default=None,
                    help="assignments.tsv from demux.py (optional, adds comparison column)")
-    p.add_argument("--min-concordance", type=float, default=0.3, metavar="F",
-                   help="min concordance to accept a DB match (default: 0.9)")
+    p.add_argument("--min-concordance", type=float, default=0.65, metavar="F",
+                   help="ignored — kept for CLI compatibility; acceptance is driven by the "
+                        "confidence column written by match_vireo.py (high/low = accept, "
+                        "no_match/no_data = reject)")
     return p.parse_args()
 
 
@@ -59,7 +61,9 @@ def load_donor_matches(matches_path, min_concordance):
             conc       = float(row["concordance"]) if row["concordance"] else 0.0
             n          = int(row["n_positions"])   if row["n_positions"]  else 0
             confidence = row.get("confidence", "").strip()
-            if run_id != "no_match" and n > 0 and conc >= min_concordance:
+            # Accept high and low confidence — match_vireo.py already applied
+            # the threshold; no_match / no_data means genuinely unassigned.
+            if run_id != "no_match" and n > 0 and confidence in ("high", "low"):
                 mapping[donor] = (cell_line, conc, n, confidence)
             else:
                 mapping[donor] = None
