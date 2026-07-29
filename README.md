@@ -621,6 +621,40 @@ with open("data/cell_line_map.csv") as f:
 conn.commit()
 ```
 
+### Backfilling 0/0 calls for legacy runs
+
+Reference runs loaded before the current pipeline version may only have ALT calls in the
+DB (their `bcftools mpileup` was run without `-T`, genome-wide, and `bcftools call` used
+`--variants-only` or equivalent). These runs miss the 0/0 information that makes the
+concordance metric variant-count-agnostic.
+
+If the original `.mpileup.bcf` is still on disk (check `results/<run_id>/vcf/`), you can
+retroactively add 0/0 calls without re-aligning:
+
+```bash
+# Preview what would be done (no changes):
+python scripts/backfill_panel_genotypes.py --dry-run
+
+# Run for all runs currently missing 0/0 in the DB:
+python scripts/backfill_panel_genotypes.py
+
+# Or for specific runs only:
+python scripts/backfill_panel_genotypes.py --run-ids SRR5071667_hg38 SRR5071672_hg38
+```
+
+The script:
+1. Runs `bcftools call -m -T <panel>` on the existing mpileup BCF — restricts output to
+   SNP panel positions and emits both 0/0 and ALT calls (same filter thresholds as the
+   pipeline: DP < 10 or QUAL < 30 for non-ref calls).
+2. Deletes the old `genotype_calls` rows for that `run_id` in SQLite.
+3. Reloads from the new VCF.
+
+Run metadata (mapping rate, Grist records) is not changed. New VCFs are written to
+`results/<run_id>/vcf/<sample>.panel_genotyped.vcf`.
+
+After the backfill completes, re-run `match_vireo.py` for any affected pools and raise
+`--min-concordance` to `0.80` (see threshold guidance below).
+
 ### How genotype matching works
 
 After Vireo clusters cells into anonymous donors (donor0, donor1, …) and infers a
@@ -637,10 +671,16 @@ comparison.
 **The genotype concordance metric**
 
 ```
-                  positions where BOTH have a valid call  AND  dosages match (0=0, 1=1, 2=2)
+                  positions where BOTH have a valid call  AND  BOTH agree on ALT presence
 concordance  =  ───────────────────────────────────────────────────────────────────────────────
                   positions where BOTH have a valid call
 ```
+
+"ALT presence" means dosage > 0 (i.e. at least one copy of an ALT allele). Both 0/1 and
+1/1 count as "ALT present"; 0/0 counts as "ALT absent". The het/hom distinction is
+intentionally ignored — Vireo frequently calls truly homozygous-alt positions as
+heterozygous due to low per-cell read depth, and penalising for that would unfairly lower
+the concordance of true matches.
 
 The pipeline genotypes all WES/WGS samples at every position in the 1000G common-SNP
 panel (AF > 5%) using `bcftools mpileup -T`, retaining 0/0 (homozygous-ref) calls as
@@ -650,6 +690,14 @@ The intersection is typically tens of thousands of sites per comparison.
 This metric is **variant-count-agnostic**: a reference sample with fewer ALT calls is no
 longer artificially favoured. Positions where the true match has ALT and a wrong reference
 has 0/0 count as mismatches, clearly distinguishing the wrong cell line.
+
+**Graceful degradation for legacy DB entries**
+
+Reference runs loaded before the current pipeline (i.e. without the `-T` panel filter in
+`bcftools mpileup`) may only store ALT calls and have no 0/0 rows in the DB. For those
+runs `r_valid` covers only ALT positions, so the metric reduces to the original ALT-recall.
+Use `scripts/backfill_panel_genotypes.py` to retroactively add 0/0 calls from the existing
+mpileup BCF (see below).
 
 **Confidence tiers**
 
@@ -683,9 +731,15 @@ WHERE name = 'unknown_pool_ctr_v4_donor3';
 ### Tuning Vireo matching thresholds
 
 - **`--min-concordance`**: the minimum genotype concordance to accept a Vireo→DB match.
-  The default of `0.65` is calibrated for the current DB state where many reference runs store only ALT calls (no 0/0). For those runs the metric is equivalent to ALT-recall and true matches score 0.65–0.85. Runs processed with the current pipeline (which stores 0/0 calls) produce concordance values of 0.90+ for true matches, so raise the threshold to 0.85 once those populate the DB.
-  Donors from small cell clusters (< 500 cells)
-  may score lower due to noisy Vireo genotypes; use `--unique` to still assign them.
+  Two calibration regimes exist depending on DB state:
+  - **Legacy DB (ALT calls only, no 0/0)**: use `0.65`. The metric reduces to ALT-recall
+    and true matches score 0.65–0.85. Background (wrong-reference) scores are 0.30–0.55.
+  - **Full DB (0/0 calls present, after backfill)**: use `0.80`. With the full denominator,
+    true matches score 0.82–0.95 while the background rises to 0.65–0.75 (shared ref/ref
+    positions inflate all scores). The `--min-gap` criterion is especially important here
+    to guard against sparse-Vireo donors that score high against multiple references.
+  Donors from small cell clusters (< 500 cells) may score lower due to sparse Vireo
+  genotypes (mostly 0/0 calls); use `--unique` to still assign them.
 - **`--min-gap`**: the minimum margin between best and second-best concordance.
   A gap of `0.10` is appropriate for the genotype-concordance metric; increase to
   `0.15` if you have very similar cell lines in the DB.
@@ -822,6 +876,7 @@ against the full hg38 genome.
 | `results/<run_id>/bam/<sample>.flagstat.txt` | Mapping rate summary |
 | `results/<run_id>/vcf/<sample>.raw.vcf` | Unfiltered genotypes at common SNP positions |
 | `results/<run_id>/vcf/<sample>.genotyped.vcf` | Depth- and quality-filtered genotypes (0/0, 0/1, 1/1) |
+| `results/<run_id>/vcf/<sample>.panel_genotyped.vcf` | Backfilled panel genotypes (created by `backfill_panel_genotypes.py` for legacy runs) |
 | `results/<run_id>/db/<sample>.loaded` | Touch file confirming db load completed |
 | `results/demux/<demux_run_id>/cellsnp/` | cellSNP-lite per-cell pileup directory |
 | `results/demux/<demux_run_id>/vireo/` | Vireo donor clustering outputs |

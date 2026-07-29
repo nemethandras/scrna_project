@@ -54,7 +54,7 @@ def load_donor_genotypes(vireo_dir):
     Returns
     -------
     donors    : list of donor name strings
-    positions : list of (chrom, pos, ref, alt) tuples
+    positions : list of (chrom, pos) tuples
     dosage    : int array (n_positions, n_donors) — 0/1/2, -1 = no call
     """
     d = Path(vireo_dir)
@@ -76,8 +76,7 @@ def load_donor_genotypes(vireo_dir):
     GT_MAP = {(0, 0): 0, (0, 1): 1, (1, 0): 1, (1, 1): 2}
 
     for v in vcf:
-        alt = str(v.ALT[0]) if v.ALT else "."
-        positions.append((v.CHROM, v.POS, v.REF, alt))
+        positions.append((v.CHROM, v.POS))
         row = []
         for gt in v.genotypes:
             a1, a2 = gt[0], gt[1]
@@ -134,14 +133,17 @@ def load_db_genotypes(db_path, run_ids, positions):
         conn.close()
         raise SystemExit("\nERROR: no reference run_ids found in the database.\n")
 
-    pos_index = {p: i for i, p in enumerate(positions)}
+    # Key on (chrom, pos) only — not (chrom, pos, ref, alt) — so that 0/0 DB calls
+    # (stored with alt_allele='.') match Vireo positions that carry a real ALT allele
+    # (because another donor at that site has the ALT). The SNP panel has unique positions.
+    pos_index = {(p[0], p[1]): i for i, p in enumerate(positions)}
     GT_MAP = {"0/0": 0, "0/1": 1, "1/0": 1, "1/1": 2}
     dosage = np.full((len(positions), len(run_ids)), -1, dtype=np.int8)
 
     placeholders = ",".join("?" * len(run_ids))
     rows = conn.execute(f"""
         SELECT r.run_id,
-               v.chromosome, v.position, v.ref_allele, v.alt_allele,
+               v.chromosome, v.position,
                gc.genotype
         FROM   genotype_calls gc
         JOIN   variants v ON gc.variant_id = v.variant_id
@@ -152,10 +154,14 @@ def load_db_genotypes(db_path, run_ids, positions):
     conn.close()
 
     run_idx = {r: i for i, r in enumerate(run_ids)}
-    for run_id, chrom, pos, ref, alt, gt in rows:
-        key = (chrom, pos, ref, alt)
+    for run_id, chrom, pos, gt in rows:
+        key = (chrom, pos)
         if key in pos_index and gt in GT_MAP:
-            dosage[pos_index[key], run_idx[run_id]] = GT_MAP[gt]
+            idx = pos_index[key]
+            ri  = run_idx[run_id]
+            # Keep the ALT call if one exists (prefer non-ref over 0/0 for multiallelic)
+            if dosage[idx, ri] < 0 or GT_MAP[gt] > 0:
+                dosage[idx, ri] = GT_MAP[gt]
 
     print(f"  {len(run_ids)} reference lines in DB")
     return run_ids, dosage
