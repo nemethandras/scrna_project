@@ -258,6 +258,8 @@ scrna_project/
 │   │   ├── cellsnp/             # cellSNP-lite per-cell pileup
 │   │   └── assignments.tsv      # cell barcode → cell line assignments
 │   └── variants.db              # SQLite database accumulating all runs
+├── validation/
+│   └── donor_ids.tsv            # reference-guided Vireo output for Pool_ctr (ground-truth composition)
 ├── logs/
 │   └── <run_id>/                # logs mirror the results structure
 ├── .env                         # API credentials — never committed
@@ -816,8 +818,9 @@ conda run -n scrna pip install ipywidgets plotly jupyterlab
 | Cross-sample QC overview | Mapping rate (with 85% threshold) and filtered variant counts for every run |
 | Per-run deep-dive | Dropdown — depth distribution, QUAL scores, variant types, allele frequency spectrum, variants per chromosome, depth vs QUAL scatter |
 | Cross-sample comparison | Two dropdowns — variant overlap, Jaccard similarity, side-by-side depth and AF plots |
-| Variant overlap heatmap | Jaccard and containment similarity between all cell lines in the DB |
+| Variant overlap heatmap | Jaccard and containment heatmaps between all cell lines; similarity distribution curves (KDE + median) for the upper-triangle Jaccard pairs and all off-diagonal containment values |
 | scRNA demultiplexing results | Dropdown — cell composition bar (DB-matched + unmatched vireo donors), doublet pair heatmap, Vireo probability violins, concordance & gap bars per donor |
+| Validation — reference-guided Vireo | Cell composition, prob_max violins, and n_vars violins from `validation/donor_ids.tsv` (reference-guided Vireo run on Pool_ctr with known cell-line genotypes) |
 | Concordance profiles | Full concordance matrix plots — best/worst donor bar charts (Plot A), per-donor horizontal profiles for best/median/worst donors (Plot B), concordance score distribution histograms (Plot C) |
 | STAR alignment QC | Annotated splice % and % reads too short per sample (read from STAR log files) |
 | Raw SQL explorer | Text box to run any query against the database |
