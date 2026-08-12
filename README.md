@@ -235,6 +235,7 @@ scrna_project/
 ├── scripts/
 │   ├── load_to_db.py                # loads results into SQLite and Grist
 │   ├── demux.py                     # cell line demultiplexer (binomial scorer)
+│   ├── make_donor_vcf.py            # build multi-sample donor VCF from DB for reference-guided Vireo
 │   ├── match_vireo.py               # match Vireo donor genotypes against DB references
 │   ├── merge_demux.py               # merge Vireo + DB-match + scorer into final output
 │   ├── backfill_panel_genotypes.py  # retroactively add 0/0 calls for legacy runs
@@ -498,6 +499,29 @@ against reference genotypes in the DB).
 --cores N               threads for cellsnp-lite (default: 16)
 ```
 
+**Reference-guided Vireo options** (v3):
+
+```
+--known-lines NAME ...  cell line names present in this pool; must exist in the DB.
+                        The most recent run per line is used to build a donor reference VCF.
+                        Activates guided mode: Vireo is run with -d (named priors) and donor
+                        names in the output are the actual cell line names — no DB matching step.
+--donor-vcf PATH        path to an already-prepared multi-sample donor VCF to pass to Vireo.
+                        Use this when you have an external VCF or want to supply lines not in the
+                        DB.  Can be combined with --known-lines to merge DB genotypes with an
+                        external VCF.  Either flag activates guided mode.
+                        NOTE: do not point --donor-vcf at the run's own auto-generated
+                        donor_ref.vcf (results/demux/<id>/donor_ref.vcf) while also passing
+                        --known-lines — the pipeline will error immediately.  To reuse an
+                        existing VCF, omit --known-lines; to rebuild from the DB, omit
+                        --donor-vcf.
+```
+
+Guided mode is more accurate than genotype-free mode when the pool composition is known: Vireo
+uses known genotype priors instead of inferring them from sparse single-cell data, so small
+clusters and genetically similar lines are assigned correctly. The `match_vireo.py` step is
+skipped — Vireo donor labels are already the cell line names.
+
 ### scRNA examples
 
 ```bash
@@ -521,6 +545,19 @@ source .env && python run_pipeline.py --mode scrna \
     --n-donors 7 \
     --run-ids SRR5071686_hg38 SRR5071667_hg38 SRR5071672_hg38 \
               SRR5071669_hg38 SRR5071657_hg38 SRR5071662_hg38 SRR5071677_hg38
+
+# reference-guided Vireo — cell lines are known; DB genotypes used as priors
+source .env && python run_pipeline.py --mode scrna \
+    --cellsnp-dir data/Pool_ctr/cellsnp \
+    --demux-run-id pool_ctr_v5_guided \
+    --known-lines RKO HCT116 HT29 LIM1215 CACO2 HCT8 DLD1
+
+# reference-guided with an extra line not yet in the DB (supply its VCF)
+source .env && python run_pipeline.py --mode scrna \
+    --cellsnp-dir data/Pool_ctr/cellsnp \
+    --demux-run-id pool_new_guided \
+    --known-lines RKO HCT116 HT29 \
+    --donor-vcf data/new_line/new_line.vcf
 ```
 
 Follow progress:
@@ -572,8 +609,9 @@ miscalls homozygous-alt sites as heterozygous at low per-cell depth. See the
 |---|---|
 | `results/demux/<id>/assignments.tsv` | Binomial scorer: barcode → cell_line, status, score, n_positions |
 | `results/demux/<id>/vireo/donor_ids.tsv` | Vireo per-cell donor assignment and probabilities |
-| `results/demux/<id>/vireo/GT_donors.vireo.vcf.gz` | Vireo inferred donor genotypes |
-| `results/demux/<id>/donor_matches.tsv` | Vireo donor → DB cell line concordance table |
+| `results/demux/<id>/vireo/GT_donors.vireo.vcf.gz` | Vireo inferred donor genotypes (genotype-free only) |
+| `results/demux/<id>/donor_ref.vcf` | Multi-sample donor reference VCF built by `make_donor_vcf.py` (guided mode) |
+| `results/demux/<id>/donor_matches.tsv` | Vireo donor → DB cell line concordance table (genotype-free only) |
 | `results/demux/<id>/final_assignments.tsv` | **Main output** — merged Vireo + DB + scorer per cell |
 
 `final_assignments.tsv` columns:
@@ -600,7 +638,8 @@ TTACGGCC-1        unassigned  unassigned  unassigned  ...
 
 | Value | Meaning |
 |---|---|
-| `db_match` | Vireo donor was matched to a DB reference |
+| `db_match` | Vireo donor was matched to a DB reference (genotype-free mode) |
+| `guided_match` | Vireo donor name is the cell line name directly (reference-guided mode) |
 | `vireo_only` | Vireo donor had no DB match — labelled `vireo:<donor_id>` |
 | `doublet` | Vireo flagged this cell as a doublet; constituent donors resolved to cell line names where possible |
 | `unassigned` | Vireo could not assign this cell to any donor |
@@ -774,8 +813,13 @@ demux:
   demux_run_id: pool_ctr_001
   load_db: false
   threads: 8
-  n_donors: null        # Vireo donor count; null = auto-detect
-  min_concordance: 0.80  # min genotype concordance for Vireo→DB match
+  n_donors: null        # Vireo donor count; null = auto-detect (ignored in guided mode)
+  # Reference-guided Vireo (v3): set known_lines and/or donor_vcf to activate guided mode.
+  # known_lines: cell lines known to be in the pool — DB genotypes are fetched automatically.
+  # donor_vcf: path to a pre-built multi-sample donor VCF (overrides make_donor_vcf if set).
+  known_lines: []       # e.g. [RKO, HCT116, HT29, LIM1215, CACO2, HCT8, DLD1]
+  donor_vcf: null       # e.g. results/demux/pool_ctr_v5/donor_ref.vcf
+  min_concordance: 0.80  # min genotype concordance for Vireo→DB match (genotype-free only)
   min_gap: 0.10          # concordance gap required for a confident match
   min_depth: 1
   min_positions: 200

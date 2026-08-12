@@ -490,18 +490,66 @@ rule demux_cells:
 
 
 # ─────────────────────────────────────────────
-# vireo_demux — genotype-free donor clustering.
-# Runs Vireo on the cellSNP output to separate
-# cells into donors without needing a reference.
-# Produces GT_donors.vcf.gz with inferred donor
-# genotypes for subsequent DB matching.
+# make_donor_vcf — build a multi-sample donor
+# genotype VCF from DB references.  Only runs
+# when demux.known_lines is set in config.yaml.
+# Output is used by vireo_demux as -d input.
+#
+# Run explicitly:
+#   snakemake results/demux/<demux_run_id>/donor_ref.vcf
+# ─────────────────────────────────────────────
+def _known_lines():
+    return _demux_cfg_opt("known_lines") or []
+
+def _donor_vcf_path(demux_run_id):
+    explicit = _demux_cfg_opt("donor_vcf")
+    return explicit if explicit else f"results/demux/{demux_run_id}/donor_ref.vcf"
+
+rule make_donor_vcf:
+    output:
+        "results/demux/{demux_run_id}/donor_ref.vcf"
+    log:
+        "logs/demux/{demux_run_id}/make_donor_vcf.log"
+    params:
+        db          = config["db_path"],
+        cell_lines  = lambda _: " ".join(_known_lines()),
+        extra_flag  = lambda _: (
+            f"--extra-vcf {_demux_cfg_opt('donor_vcf')}"
+            if _demux_cfg_opt("donor_vcf") else ""
+        )
+    shell:
+        """
+        python scripts/make_donor_vcf.py \
+            --cell-lines {params.cell_lines} \
+            --db         {params.db} \
+            {params.extra_flag} \
+            --output     {output} \
+            2> {log}
+        """
+
+
+# ─────────────────────────────────────────────
+# vireo_demux — donor clustering.
+# Genotype-free (default): clusters cells into
+# anonymous donors and infers genotypes.
+# Reference-guided (when demux.known_lines set):
+# uses a donor genotype VCF as prior; assigns
+# cells directly to named donors.
 #
 # Run explicitly:
 #   snakemake results/demux/<demux_run_id>/vireo
 # ─────────────────────────────────────────────
+def _vireo_inputs(wildcards):
+    inputs = {"cellsnp": f"results/demux/{wildcards.demux_run_id}/cellsnp"}
+    if _known_lines() or _demux_cfg_opt("donor_vcf"):
+        # Explicit donor_vcf path takes priority; otherwise use the generated one
+        if not _demux_cfg_opt("donor_vcf"):
+            inputs["donor_ref"] = f"results/demux/{wildcards.demux_run_id}/donor_ref.vcf"
+    return inputs
+
 rule vireo_demux:
     input:
-        cellsnp = "results/demux/{demux_run_id}/cellsnp"
+        unpack(_vireo_inputs)
     output:
         directory("results/demux/{demux_run_id}/vireo")
     threads:
@@ -511,14 +559,21 @@ rule vireo_demux:
     params:
         n_flag = lambda _: (
             f"-N {config['demux']['n_donors']}"
-            if config.get("demux", {}).get("n_donors") else ""
-        )
+            if config.get("demux", {}).get("n_donors") and not _known_lines() else ""
+        ),
+        d_flag = lambda wildcards: (
+            f"-d {_demux_cfg_opt('donor_vcf') or f'results/demux/{wildcards.demux_run_id}/donor_ref.vcf'}"
+            if _known_lines() or _demux_cfg_opt("donor_vcf") else ""
+        ),
+        geno_tag = lambda _: "--genoTag GT" if (_known_lines() or _demux_cfg_opt("donor_vcf")) else ""
     shell:
         """
         mkdir -p {output}
         vireo \
             -c {input.cellsnp} \
             {params.n_flag} \
+            {params.d_flag} \
+            {params.geno_tag} \
             -o {output} \
             --randSeed 42 \
             2> {log}
@@ -527,9 +582,9 @@ rule vireo_demux:
 
 # ─────────────────────────────────────────────
 # match_vireo_donors — match Vireo's inferred
-# donor genotypes (GT_donors.vcf.gz) against
-# reference genotypes in the DB to identify
-# which cell line each anonymous donor is.
+# donor genotypes against DB references.
+# Skipped in reference-guided mode (Vireo already
+# knows the cell line identities).
 #
 # Run explicitly:
 #   snakemake results/demux/<demux_run_id>/donor_matches.tsv
@@ -565,30 +620,43 @@ rule match_vireo_donors:
 # merge_demux — combine Vireo assignments,
 # donor→DB matches, and binomial scorer output
 # into a single final assignments table.
-# Cells with a DB match get a cell line name;
-# unmatched donors keep their Vireo label.
+# In reference-guided mode (known_lines set),
+# --guided is passed and --matches is omitted.
 #
 # Run explicitly:
 #   snakemake results/demux/<demux_run_id>/final_assignments.tsv
 # ─────────────────────────────────────────────
+def _merge_inputs(wildcards):
+    inputs = {
+        "vireo":  f"results/demux/{wildcards.demux_run_id}/vireo",
+        "scorer": f"results/demux/{wildcards.demux_run_id}/assignments.tsv",
+    }
+    if not _known_lines() and not _demux_cfg_opt("donor_vcf"):
+        inputs["matches"] = f"results/demux/{wildcards.demux_run_id}/donor_matches.tsv"
+    return inputs
+
 rule merge_demux:
     input:
-        vireo   = "results/demux/{demux_run_id}/vireo",
-        matches = "results/demux/{demux_run_id}/donor_matches.tsv",
-        scorer  = "results/demux/{demux_run_id}/assignments.tsv"
+        unpack(_merge_inputs)
     output:
         "results/demux/{demux_run_id}/final_assignments.tsv"
     log:
         "logs/demux/{demux_run_id}/merge_demux.log"
     params:
-        min_concordance = lambda _: config.get("demux", {}).get("min_concordance", 0.9)
+        min_concordance = lambda _: config.get("demux", {}).get("min_concordance", 0.9),
+        guided_flag     = lambda _: "--guided" if (_known_lines() or _demux_cfg_opt("donor_vcf")) else "",
+        matches_flag    = lambda wildcards: (
+            "" if (_known_lines() or _demux_cfg_opt("donor_vcf"))
+            else f"--matches results/demux/{wildcards.demux_run_id}/donor_matches.tsv"
+        )
     shell:
         """
         python scripts/merge_demux.py \
             --vireo-dir        {input.vireo} \
-            --matches          {input.matches} \
+            {params.matches_flag} \
             --scorer           {input.scorer} \
             --output           {output} \
             --min-concordance  {params.min_concordance} \
+            {params.guided_flag} \
             2> {log}
         """

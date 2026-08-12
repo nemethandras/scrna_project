@@ -33,8 +33,9 @@ def parse_args():
     )
     p.add_argument("--vireo-dir",       required=True,
                    help="Vireo output directory (must contain donor_ids.tsv)")
-    p.add_argument("--matches",         required=True,
-                   help="donor_matches.tsv from match_vireo.py")
+    p.add_argument("--matches",         default=None,
+                   help="donor_matches.tsv from match_vireo.py "
+                        "(omit when --guided is set)")
     p.add_argument("--output",          required=True,
                    help="output TSV path for final merged assignments")
     p.add_argument("--scorer",          default=None,
@@ -43,6 +44,9 @@ def parse_args():
                    help="ignored — kept for CLI compatibility; acceptance is driven by the "
                         "confidence column written by match_vireo.py (high/low = accept, "
                         "no_match/no_data = reject)")
+    p.add_argument("--guided", action="store_true",
+                   help="reference-guided mode: Vireo donor_id is already the cell line name "
+                        "(from donor_ref.vcf column headers) — skip donor_matches lookup")
     return p.parse_args()
 
 
@@ -100,20 +104,30 @@ def load_scorer_assignments(scorer_path):
 def main():
     args = parse_args()
 
+    if not args.guided and not args.matches:
+        raise SystemExit(
+            "ERROR: --matches is required in genotype-free mode. "
+            "Use --guided when running reference-guided Vireo (no donor_matches.tsv needed)."
+        )
+
     print(f"Loading Vireo assignments from: {args.vireo_dir}")
     vireo = load_vireo_assignments(args.vireo_dir)
     print(f"  {len(vireo):,} cells")
 
-    print(f"Loading donor→cell_line matches from: {args.matches}")
-    donor_map = load_donor_matches(args.matches, args.min_concordance)
-    print(f"  {sum(v is not None for v in donor_map.values())}/{len(donor_map)} donors matched to DB "
-          f"(concordance >= {args.min_concordance})")
-    for donor, match in sorted(donor_map.items()):
-        if match:
-            line, conc, n, conf = match
-            print(f"    {donor:<12} → {line}  (concordance={conc:.3f}, n={n:,}, confidence={conf})")
-        else:
-            print(f"    {donor:<12} → no_match")
+    if args.guided:
+        print("Reference-guided mode: using Vireo donor names directly as cell line labels.")
+        donor_map = None
+    else:
+        print(f"Loading donor→cell_line matches from: {args.matches}")
+        donor_map = load_donor_matches(args.matches, args.min_concordance)
+        print(f"  {sum(v is not None for v in donor_map.values())}/{len(donor_map)} donors matched to DB "
+              f"(concordance >= {args.min_concordance})")
+        for donor, match in sorted(donor_map.items()):
+            if match:
+                line, conc, n, conf = match
+                print(f"    {donor:<12} → {line}  (concordance={conc:.3f}, n={n:,}, confidence={conf})")
+            else:
+                print(f"    {donor:<12} → no_match")
 
     scorer = load_scorer_assignments(args.scorer)
     has_scorer = bool(scorer)
@@ -137,14 +151,17 @@ def main():
             prob_dbl = vrow.get("prob_doublet", "")
 
             if donor == "doublet":
-                # Resolve constituent donors to cell line names where possible
                 best_doublet = vrow.get("best_doublet", "")
                 if best_doublet:
                     parts = [p.strip() for p in best_doublet.split(",")]
-                    resolved = []
-                    for part in parts:
-                        m = donor_map.get(part)
-                        resolved.append(m[0] if m else f"vireo:{part}")
+                    if args.guided:
+                        # In guided mode, parts are already cell line names
+                        resolved = parts
+                    else:
+                        resolved = []
+                        for part in parts:
+                            m = donor_map.get(part)
+                            resolved.append(m[0] if m else f"vireo:{part}")
                     cell_line = "doublet:" + "+".join(resolved)
                 else:
                     cell_line = "doublet"
@@ -160,6 +177,14 @@ def main():
                 n_pos       = ""
                 confidence  = ""
                 counts["unassigned"] += 1
+            elif args.guided:
+                # Reference-guided: Vireo donor_id is already the cell line name
+                cell_line   = donor
+                concordance = ""
+                n_pos       = ""
+                confidence  = "guided"
+                source      = "guided_match"
+                counts["db_match"] += 1
             else:
                 match = donor_map.get(donor)
                 if match:

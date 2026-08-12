@@ -204,9 +204,20 @@ def run_scrna(args):
             f'echo "Using existing cellsnp dir: {cellsnp_dir}"'
         )
 
-    vireo_dir    = f"results/demux/{demux_run_id}/vireo"
+    vireo_dir     = f"results/demux/{demux_run_id}/vireo"
     donor_matches = f"results/demux/{demux_run_id}/donor_matches.tsv"
-    n_flag       = f"-N {args.n_donors}" if args.n_donors else ""
+    final_out     = f"results/demux/{demux_run_id}/final_assignments.tsv"
+
+    # ── Determine Vireo mode ──────────────────────────────────────────────────
+    guided = bool(args.known_lines or args.donor_vcf)
+    donor_ref_vcf = args.donor_vcf or f"results/demux/{demux_run_id}/donor_ref.vcf"
+
+    if guided:
+        vireo_d_flag = f"-d {donor_ref_vcf}"
+        n_flag       = ""   # donor count inferred from VCF columns
+    else:
+        vireo_d_flag = ""
+        n_flag       = f"-N {args.n_donors}" if args.n_donors else ""
 
     script_lines += [
         f'echo "--- demux (binomial scorer) ---"',
@@ -223,30 +234,94 @@ def run_scrna(args):
             f' --no-match-threshold {args.no_match_threshold}'
             f' {load_db_flag}'
         ),
-        f'echo "--- vireo (genotype-free clustering) ---"',
-        f'mkdir -p {vireo_dir}',
-        f'vireo -c {cellsnp_dir} {n_flag} -o {vireo_dir} --randSeed 42',
-        f'echo "--- matching Vireo donors to DB ---"',
-        (
-            f'python scripts/match_vireo.py'
-            f' --vireo-dir {vireo_dir}'
-            f' --db {db}'
-            f' --run-ids {run_ids_str}'
-            f' --output {donor_matches}'
-            f' --min-concordance {args.min_concordance}'
-            f' --min-gap {args.min_gap}'
-            + (' --unique' if args.unique else '')
-        ),
-        f'echo "--- merging results ---"',
-        f'python scripts/merge_demux.py'
-        f' --vireo-dir {vireo_dir}'
-        f' --matches {donor_matches}'
-        f' --scorer {output}'
-        f' --output results/demux/{demux_run_id}/final_assignments.tsv'
-        f' --min-concordance {args.min_concordance}',
     ]
 
-    if args.add_unmatched:
+    # ── Build donor reference VCF when --known-lines is given ─────────────────
+    if args.known_lines and not args.donor_vcf:
+        known_str = " ".join(args.known_lines)
+        script_lines += [
+            f'echo "--- building donor reference VCF from DB ---"',
+            (
+                f'python scripts/make_donor_vcf.py'
+                f' --cell-lines {known_str}'
+                f' --db {db}'
+                f' --output {donor_ref_vcf}'
+            ),
+        ]
+    elif args.known_lines and args.donor_vcf:
+        # --known-lines + --donor-vcf: DB lines merged with extra lines from file.
+        # The --donor-vcf is the *input* extra-lines VCF; output always goes to the
+        # auto-generated path.  Guard against self-overwrite when the user points
+        # --donor-vcf at the auto-generated path (would duplicate every donor).
+        auto_vcf = f"results/demux/{demux_run_id}/donor_ref.vcf"
+        if os.path.abspath(args.donor_vcf) == os.path.abspath(auto_vcf):
+            raise SystemExit(
+                f"ERROR: --donor-vcf points at '{auto_vcf}', which is the auto-generated\n"
+                f"  output path for this demux run.  This would read and write the same file.\n"
+                f"  To reuse an existing VCF, omit --known-lines and pass --donor-vcf only.\n"
+                f"  To rebuild from the DB, omit --donor-vcf and pass --known-lines only."
+            )
+        known_str = " ".join(args.known_lines)
+        donor_ref_vcf = auto_vcf
+        vireo_d_flag  = f"-d {donor_ref_vcf}"
+        script_lines += [
+            f'echo "--- building donor reference VCF (DB + extra VCF) ---"',
+            (
+                f'python scripts/make_donor_vcf.py'
+                f' --cell-lines {known_str}'
+                f' --extra-vcf {args.donor_vcf}'
+                f' --db {db}'
+                f' --output {donor_ref_vcf}'
+            ),
+        ]
+
+    # ── Vireo ─────────────────────────────────────────────────────────────────
+    mode_label = "reference-guided" if guided else "genotype-free"
+    script_lines += [
+        f'echo "--- vireo ({mode_label} clustering) ---"',
+        f'mkdir -p {vireo_dir}',
+        f'vireo -c {cellsnp_dir} {n_flag} {vireo_d_flag}'
+        + (' --genoTag GT' if guided else '')
+        + f' -o {vireo_dir} --randSeed 42',
+    ]
+
+    # ── Post-Vireo matching (genotype-free only) ──────────────────────────────
+    if guided:
+        script_lines += [
+            f'echo "--- merging results (reference-guided) ---"',
+            (
+                f'python scripts/merge_demux.py'
+                f' --vireo-dir {vireo_dir}'
+                f' --scorer {output}'
+                f' --output {final_out}'
+                f' --guided'
+            ),
+        ]
+    else:
+        script_lines += [
+            f'echo "--- matching Vireo donors to DB ---"',
+            (
+                f'python scripts/match_vireo.py'
+                f' --vireo-dir {vireo_dir}'
+                f' --db {db}'
+                f' --run-ids {run_ids_str}'
+                f' --output {donor_matches}'
+                f' --min-concordance {args.min_concordance}'
+                f' --min-gap {args.min_gap}'
+                + (' --unique' if args.unique else '')
+            ),
+            f'echo "--- merging results ---"',
+            (
+                f'python scripts/merge_demux.py'
+                f' --vireo-dir {vireo_dir}'
+                f' --matches {donor_matches}'
+                f' --scorer {output}'
+                f' --output {final_out}'
+                f' --min-concordance {args.min_concordance}'
+            ),
+        ]
+
+    if args.add_unmatched and not guided:
         script_lines += [
             f'echo "--- adding unmatched donors to DB ---"',
             (
@@ -262,9 +337,10 @@ def run_scrna(args):
         f'echo "Done: $(date)"',
         f'echo "Binomial assignments : {output}"',
         f'echo "Vireo assignments    : {vireo_dir}/donor_ids.tsv"',
-        f'echo "Vireo→DB matches     : {donor_matches}"',
-        f'echo "Final merged output  : results/demux/{demux_run_id}/final_assignments.tsv"',
+        f'echo "Final merged output  : {final_out}"',
     ]
+    if not guided:
+        script_lines.insert(-1, f'echo "Vireo→DB matches     : {donor_matches}"')
 
     script = "\n".join(script_lines) + "\n"
 
@@ -428,6 +504,17 @@ examples:
     scrna.add_argument(
         "--add-unmatched", action="store_true",
         help="add Vireo donors with no DB match to the DB as new unlabelled samples (run add_unmatched_donors.py as final step)",
+    )
+    scrna.add_argument(
+        "--known-lines", nargs="+", metavar="NAME", default=None,
+        help="cell line names known to be in the pool (enables reference-guided Vireo); "
+             "genotypes are fetched from the DB automatically (most recent run per line)",
+    )
+    scrna.add_argument(
+        "--donor-vcf", metavar="PATH", default=None,
+        help="pre-built donor genotype VCF for reference-guided Vireo; "
+             "use instead of --known-lines when you already have the file, or combine with "
+             "--known-lines to supply extra lines not yet in the DB",
     )
 
     # ── Common options ─────────────────────────────────────────────────────

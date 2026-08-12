@@ -116,7 +116,20 @@ demux:
   load_db: false
   threads: 8
   # Number of donors for Vireo. If null, Vireo will attempt to estimate it.
+  # Ignored in reference-guided mode (n_donors is inferred from the donor VCF).
   n_donors: null
+  # ── Reference-guided Vireo ─────────────────────────────────────────────
+  # known_lines: cell line names present in this pool.  Each must exist in
+  #   the DB; the most recent run per line is used.  When set, make_donor_vcf
+  #   builds a multi-sample reference VCF and Vireo is run with -d (guided).
+  # donor_vcf: path to an already-prepared multi-sample donor genotype VCF.
+  #   Overrides make_donor_vcf — use when you have an external VCF or want
+  #   to supply extra lines not in the DB alongside DB-derived ones.
+  # Either field activates guided mode; both can be set (donor_vcf wins for
+  # the VCF path, known_lines still controls which DB lines are added).
+  # Leave both null for genotype-free mode (original behaviour).
+  known_lines: []    # e.g. [RKO, HCT116, HT29, LIM1215, CACO2, HCT8, DLD1]
+  donor_vcf: null    # e.g. results/demux/pool_ctr_v5/donor_ref.vcf
   # Minimum genotype concordance to accept a Vireo donor→DB match.
   # Donors below this threshold are labelled "vireo:<donor_id>" in the final output.
   min_concordance: 0.4   # min ALT-recall for a Vireo→DB match
