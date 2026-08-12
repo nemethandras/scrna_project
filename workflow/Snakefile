@@ -62,12 +62,44 @@ def star_reads(wildcards):
 # ─────────────────────────────────────────────
 rule all:
     input:
+        config["common_snps_vcf"],
+        config["common_snps_vcf"] + ".tbi",
         expand("results/{run}/fastqc/{sample}" + SE_STEM + "_fastqc.html", run=RUN_ID, sample=SAMPLES),
         expand("results/{run}/fastqc/{sample}_2_fastqc.html", run=RUN_ID, sample=SAMPLES) if PAIRED else [],
         expand("results/{run}/bam/{sample}.sorted.bam.bai",   run=RUN_ID, sample=SAMPLES),
         expand("results/{run}/bam/{sample}.flagstat.txt",     run=RUN_ID, sample=SAMPLES),
-        expand("results/{run}/vcf/{sample}.filtered.vcf",     run=RUN_ID, sample=SAMPLES),
+        expand("results/{run}/vcf/{sample}.genotyped.vcf",    run=RUN_ID, sample=SAMPLES),
         [] if NO_DB else expand("results/{run}/db/{sample}.loaded", run=RUN_ID, sample=SAMPLES)
+
+
+# ─────────────────────────────────────────────
+# normalize_snp_panel — run once to produce the
+# chr-prefixed, bgzipped, tabix-indexed common
+# SNP panel used as target positions for pileup.
+# Re-runs only if the source VCF changes.
+# ─────────────────────────────────────────────
+rule normalize_snp_panel:
+    input:
+        vcf      = config["common_snps_source"],
+        conv     = "workflow/chr_name_conv.txt"
+    output:
+        vcf      = config["common_snps_vcf"],
+        tbi      = config["common_snps_vcf"] + ".tbi"
+    log:
+        "logs/normalize_snp_panel.log"
+    shell:
+        """
+        mkdir -p $(dirname {output.vcf})
+        bcftools annotate \
+            --rename-chrs {input.conv} \
+            {input.vcf} \
+            2> {log} \
+        | bcftools sort \
+            --output-type z \
+            -o {output.vcf} \
+            2>> {log}
+        tabix -p vcf {output.vcf} 2>> {log}
+        """
 
 
 # ─────────────────────────────────────────────
@@ -205,13 +237,18 @@ else:
 
 
 # ─────────────────────────────────────────────
-# bcftools mpileup — pileup reads at every site
+# bcftools mpileup — pileup reads at common SNP
+# positions only (-T restricts to target sites).
+# --annotate AD adds allelic depth per position
+# so we can store ref/alt counts for all GTs.
 # ─────────────────────────────────────────────
 rule bcftools_mpileup:
     input:
-        bam   = "results/" + RUN_ID + "/bam/{sample}.sorted.bam",
-        bai   = "results/" + RUN_ID + "/bam/{sample}.sorted.bam.bai",
-        ref   = config["reference_genome"]
+        bam    = "results/" + RUN_ID + "/bam/{sample}.sorted.bam",
+        bai    = "results/" + RUN_ID + "/bam/{sample}.sorted.bam.bai",
+        ref    = config["reference_genome"],
+        snps   = config["common_snps_vcf"],
+        snps_i = config["common_snps_vcf"] + ".tbi"
     output:
         "results/" + RUN_ID + "/vcf/{sample}.mpileup.bcf"
     log:
@@ -223,8 +260,10 @@ rule bcftools_mpileup:
         """
         bcftools mpileup \
             -f {input.ref} \
+            -T {input.snps} \
             -q {params.min_mq} \
             -Q {params.min_bq} \
+            --annotate AD \
             --output-type b \
             -o {output} \
             {input.bam} \
@@ -233,7 +272,11 @@ rule bcftools_mpileup:
 
 
 # ─────────────────────────────────────────────
-# bcftools call — call variants from pileup
+# bcftools call — genotype all target positions.
+# --variants-only is intentionally omitted so
+# that 0/0 (ref/ref) calls are also emitted —
+# these are informative for donor matching when
+# coverage is sparse.
 # ─────────────────────────────────────────────
 rule bcftools_call:
     input:
@@ -248,7 +291,6 @@ rule bcftools_call:
         """
         bcftools call \
             {params.caller} \
-            --variants-only \
             --output-type v \
             -o {output} \
             {input} \
@@ -257,13 +299,18 @@ rule bcftools_call:
 
 
 # ─────────────────────────────────────────────
-# bcftools filter — apply quality thresholds
+# bcftools filter — apply quality thresholds.
+# QUAL < min_qual is only applied to ALT calls
+# (GT != "0/0") because ref/ref positions have
+# QUAL ~ 0 by design and would otherwise all be
+# dropped. DP < min_depth drops all positions
+# regardless of genotype.
 # ─────────────────────────────────────────────
 rule bcftools_filter:
     input:
         "results/" + RUN_ID + "/vcf/{sample}.raw.vcf"
     output:
-        "results/" + RUN_ID + "/vcf/{sample}.filtered.vcf"
+        "results/" + RUN_ID + "/vcf/{sample}.genotyped.vcf"
     log:
         "logs/" + RUN_ID + "/bcftools_filter/{sample}.log"
     params:
@@ -272,7 +319,7 @@ rule bcftools_filter:
     shell:
         """
         bcftools filter \
-            -e 'QUAL < {params.min_qual} || DP < {params.min_depth}' \
+            -e 'DP < {params.min_depth} || (GT!="0/0" && QUAL < {params.min_qual})' \
             -o {output} \
             {input} \
             2> {log}
@@ -285,7 +332,7 @@ rule bcftools_filter:
 # ─────────────────────────────────────────────
 rule load_to_database:
     input:
-        vcf      = "results/" + RUN_ID + "/vcf/{sample}.filtered.vcf",
+        vcf      = "results/" + RUN_ID + "/vcf/{sample}.genotyped.vcf",
         flagstat = "results/" + RUN_ID + "/bam/{sample}.flagstat.txt",
         star_log = "results/" + RUN_ID + "/star/{sample}/Log.final.out"
     output:
@@ -296,7 +343,11 @@ rule load_to_database:
         run_id     = RUN_ID,
         db         = config["db_path"],
         reference  = config["reference_genome"],
-        sequencing = config["sequencing"]
+        sequencing = config["sequencing"],
+        cell_line_flag = (
+            f"--cell-line {config['cell_line']}"
+            if config.get("cell_line") else ""
+        )
     shell:
         """
         python scripts/load_to_db.py \
@@ -308,5 +359,236 @@ rule load_to_database:
             --db         {params.db} \
             --reference  {params.reference} \
             --sequencing {params.sequencing} \
+            {params.cell_line_flag} \
+            2> {log}
+        """
+
+
+# ═════════════════════════════════════════════
+# Demultiplexing — CellRanger BAM → cell line
+# assignment against the genotype database.
+#
+# These rules are NOT part of rule all.
+# Run explicitly:
+#   snakemake results/demux/<demux_run_id>/assignments.tsv
+#
+# Configure the demux: section in config.yaml first.
+# ═════════════════════════════════════════════
+
+def _demux_cfg(key):
+    """Retrieve a required demux config value, failing clearly if not set."""
+    val = config.get("demux", {}).get(key)
+    if val is None:
+        raise ValueError(
+            f"demux.{key} is not set in config.yaml — "
+            f"fill in the demux: section before running demultiplexing."
+        )
+    return val
+
+
+def _demux_cfg_opt(key):
+    """Retrieve an optional demux config value; returns None if not set."""
+    return config.get("demux", {}).get(key)
+
+
+def _demux_bam():
+    """Return the BAM path: explicit demux.bam, or constructed from cellranger_dir."""
+    bam = _demux_cfg_opt("bam")
+    if bam:
+        return bam
+    cdir = _demux_cfg_opt("cellranger_dir")
+    if cdir:
+        return os.path.join(cdir, "outs/possorted_genome_bam.bam")
+    raise ValueError(
+        "Set either demux.bam or demux.cellranger_dir in config.yaml."
+    )
+
+
+def _demux_barcodes():
+    """Return the barcodes path: explicit demux.barcodes, or constructed from cellranger_dir."""
+    bc = _demux_cfg_opt("barcodes")
+    if bc:
+        return bc
+    cdir = _demux_cfg_opt("cellranger_dir")
+    if cdir:
+        return os.path.join(cdir, "outs/filtered_feature_bc_matrix/barcodes.tsv.gz")
+    raise ValueError(
+        "Set either demux.barcodes or demux.cellranger_dir in config.yaml."
+    )
+
+
+# ─────────────────────────────────────────────
+# cellsnp_pileup — pileup the CellRanger BAM at
+# common SNP positions, per cell barcode.
+# Produces the per-cell AD/DP matrices used by
+# the scorer.
+# ─────────────────────────────────────────────
+rule cellsnp_pileup:
+    input:
+        bam      = lambda _: _demux_bam(),
+        barcodes = lambda _: _demux_barcodes(),
+        snps    = config["common_snps_vcf"],
+        snps_i  = config["common_snps_vcf"] + ".tbi"
+    output:
+        directory("results/demux/{demux_run_id}/cellsnp")
+    threads:
+        lambda _: config.get("demux", {}).get("threads", 8)
+    log:
+        "logs/demux/{demux_run_id}/cellsnp.log"
+    shell:
+        """
+        mkdir -p {output}
+        cellsnp-lite \
+            -s {input.bam} \
+            -b {input.barcodes} \
+            -O {output} \
+            -R {input.snps} \
+            -p {threads} \
+            --minMAF 0 \
+            --minCOUNT 20 \
+            --gzip \
+            2> {log}
+        """
+
+
+# ─────────────────────────────────────────────
+# demux_cells — score each cell barcode against
+# all reference genotypes in the DB and assign
+# it to the best-matching cell line.
+# ─────────────────────────────────────────────
+rule demux_cells:
+    input:
+        cellsnp = "results/demux/{demux_run_id}/cellsnp"
+    output:
+        "results/demux/{demux_run_id}/assignments.tsv"
+    log:
+        "logs/demux/{demux_run_id}/demux.log"
+    params:
+        db          = config["db_path"],
+        run_ids     = lambda _: " ".join(_demux_cfg("run_ids")) or "all",
+        min_depth   = lambda _: config.get("demux", {}).get("min_depth", 10),
+        min_pos     = lambda _: config.get("demux", {}).get("min_positions", 50),
+        gap         = lambda _: config.get("demux", {}).get("doublet_gap", 2.0),
+        threshold   = lambda _: config.get("demux", {}).get("no_match_threshold", -0.5),
+        demux_id    = "{demux_run_id}",
+        load_db_flag = lambda _: "--load-db" if config.get("demux", {}).get("load_db") else ""
+    shell:
+        """
+        python scripts/demux.py \
+            --cellsnp-dir {input.cellsnp} \
+            --db          {params.db} \
+            --run-ids     {params.run_ids} \
+            --output      {output} \
+            --min-depth   {params.min_depth} \
+            --min-positions {params.min_pos} \
+            --doublet-gap {params.gap} \
+            --no-match-threshold {params.threshold} \
+            --demux-run-id {params.demux_id} \
+            {params.load_db_flag} \
+            2> {log}
+        """
+
+
+# ─────────────────────────────────────────────
+# vireo_demux — genotype-free donor clustering.
+# Runs Vireo on the cellSNP output to separate
+# cells into donors without needing a reference.
+# Produces GT_donors.vcf.gz with inferred donor
+# genotypes for subsequent DB matching.
+#
+# Run explicitly:
+#   snakemake results/demux/<demux_run_id>/vireo
+# ─────────────────────────────────────────────
+rule vireo_demux:
+    input:
+        cellsnp = "results/demux/{demux_run_id}/cellsnp"
+    output:
+        directory("results/demux/{demux_run_id}/vireo")
+    threads:
+        lambda _: config.get("demux", {}).get("threads", 8)
+    log:
+        "logs/demux/{demux_run_id}/vireo.log"
+    params:
+        n_flag = lambda _: (
+            f"-N {config['demux']['n_donors']}"
+            if config.get("demux", {}).get("n_donors") else ""
+        )
+    shell:
+        """
+        mkdir -p {output}
+        vireo \
+            -c {input.cellsnp} \
+            {params.n_flag} \
+            -o {output} \
+            --randSeed 42 \
+            2> {log}
+        """
+
+
+# ─────────────────────────────────────────────
+# match_vireo_donors — match Vireo's inferred
+# donor genotypes (GT_donors.vcf.gz) against
+# reference genotypes in the DB to identify
+# which cell line each anonymous donor is.
+#
+# Run explicitly:
+#   snakemake results/demux/<demux_run_id>/donor_matches.tsv
+# ─────────────────────────────────────────────
+rule match_vireo_donors:
+    input:
+        vireo = "results/demux/{demux_run_id}/vireo"
+    output:
+        "results/demux/{demux_run_id}/donor_matches.tsv"
+    log:
+        "logs/demux/{demux_run_id}/match_vireo.log"
+    params:
+        db      = config["db_path"],
+        run_ids  = lambda _: " ".join(_demux_cfg_opt("run_ids") or []) or "all",
+        min_pos  = lambda _: config.get("demux", {}).get("min_positions", 50),
+        min_conc = lambda _: config.get("demux", {}).get("min_concordance", 0.4),
+        min_gap  = lambda _: config.get("demux", {}).get("min_gap", 0.15),
+    shell:
+        """
+        python scripts/match_vireo.py \
+            --vireo-dir       {input.vireo} \
+            --db              {params.db} \
+            --run-ids         {params.run_ids} \
+            --output          {output} \
+            --min-positions   {params.min_pos} \
+            --min-concordance {params.min_conc} \
+            --min-gap         {params.min_gap} \
+            2> {log}
+        """
+
+
+# ─────────────────────────────────────────────
+# merge_demux — combine Vireo assignments,
+# donor→DB matches, and binomial scorer output
+# into a single final assignments table.
+# Cells with a DB match get a cell line name;
+# unmatched donors keep their Vireo label.
+#
+# Run explicitly:
+#   snakemake results/demux/<demux_run_id>/final_assignments.tsv
+# ─────────────────────────────────────────────
+rule merge_demux:
+    input:
+        vireo   = "results/demux/{demux_run_id}/vireo",
+        matches = "results/demux/{demux_run_id}/donor_matches.tsv",
+        scorer  = "results/demux/{demux_run_id}/assignments.tsv"
+    output:
+        "results/demux/{demux_run_id}/final_assignments.tsv"
+    log:
+        "logs/demux/{demux_run_id}/merge_demux.log"
+    params:
+        min_concordance = lambda _: config.get("demux", {}).get("min_concordance", 0.9)
+    shell:
+        """
+        python scripts/merge_demux.py \
+            --vireo-dir        {input.vireo} \
+            --matches          {input.matches} \
+            --scorer           {input.scorer} \
+            --output           {output} \
+            --min-concordance  {params.min_concordance} \
             2> {log}
         """

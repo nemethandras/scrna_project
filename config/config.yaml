@@ -35,6 +35,13 @@ reference_genome: data/reference/genome.fa
 annotation_gtf:   data/reference/genes.gtf
 star_index_dir:   data/reference/star_index_hg38_oh99/
 
+# 1000 Genomes common SNP panel (AF > 5%, hg38).
+# common_snps_source: raw VCF with bare chrom names (1, 2, … X).
+# common_snps_vcf:    chr-prefixed, bgzipped, tabix-indexed version
+#                     generated once by the normalize_snp_panel rule.
+common_snps_source: validation/genome1K.phase3.SNP_AF5e2.chr1toX.hg38.vcf
+common_snps_vcf:    data/reference/genome1K.hg38.common_snps.vcf.gz
+
 # ─────────────────────────────────────────────
 # STAR alignment parameters
 # ─────────────────────────────────────────────
@@ -69,9 +76,11 @@ bcftools:
 # VCF filtering thresholds
 # ─────────────────────────────────────────────
 filters:
-  # Minimum variant quality score (QUAL column in VCF)
+  # Minimum variant quality score applied to ALT calls only.
+  # Ref/ref (0/0) positions are kept if depth is sufficient — their
+  # QUAL is always near zero and filtering on it would discard them.
   min_qual: 30
-  # Minimum read depth at a variant site
+  # Minimum read depth required at any genotyped position (0/0, 0/1, 1/1).
   min_depth: 10
 
 # ─────────────────────────────────────────────
@@ -80,4 +89,41 @@ filters:
 # SQLite database file that accumulates variant calls across all runs.
 # Override with --db on the command line.
 db_path: results/variants.db
+
+# ─────────────────────────────────────────────
+# Demultiplexing (CellRanger → cell line assignment)
+# ─────────────────────────────────────────────
+# Fill in these fields and run:
+#   snakemake results/demux/{demux_run_id}/assignments.tsv
+#
+# cellranger_dir: path to a CellRanger output directory.
+#   Expects:  outs/possorted_genome_bam.bam
+#             outs/filtered_feature_bc_matrix/barcodes.tsv.gz
+# run_ids: which run_ids in the DB to use as reference cell lines.
+#   Use ["all"] to compare against every run in the DB.
+# demux_run_id: unique label for this demux run (stored in DB if load_db: true).
+# load_db: whether to write cell assignments back into the DB.
+demux:
+  # Explicit BAM and barcodes paths (flat CellRanger or STARsolo output).
+  # If set, these take priority over cellranger_dir.
+  bam: null
+  barcodes: null
+  # CellRanger output directory — auto-constructs paths from outs/ subdirectory.
+  # Use this OR bam+barcodes, not both.
+  cellranger_dir: null
+  run_ids: []
+  demux_run_id: null
+  load_db: false
+  threads: 8
+  # Number of donors for Vireo. If null, Vireo will attempt to estimate it.
+  n_donors: null
+  # Minimum genotype concordance to accept a Vireo donor→DB match.
+  # Donors below this threshold are labelled "vireo:<donor_id>" in the final output.
+  min_concordance: 0.4   # min ALT-recall for a Vireo→DB match
+  min_gap: 0.15          # best must beat second-best by at least this
+  # Scoring thresholds
+  min_depth: 10      # min reads at a position in a cell to use it for scoring
+  min_positions: 50  # min positions with coverage before attempting assignment
+  doublet_gap: 2.0   # min log-likelihood gap between top two lines to call singlet
+  no_match_threshold: -0.5  # mean log-likelihood per position below which → no_match
 
