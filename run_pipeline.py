@@ -58,6 +58,8 @@ def build_snakemake_cmd(run_id, sample, args, fastq_dir=None):
         config_overrides.append(f"db_path={args.db}")
     if args.no_db:
         config_overrides.append("no_db=True")
+    if getattr(args, "keep_intermediates", False):
+        config_overrides.append("keep_intermediates=True")
 
     cmd = [
         "snakemake",
@@ -432,6 +434,12 @@ examples:
     bulk.add_argument(
         "--no-db", action="store_true",
         help="skip the load_to_database step",
+    )
+    bulk.add_argument(
+        "--keep-intermediates", action="store_true",
+        help="retain sorted.bam and mpileup.bcf after the pipeline completes "
+             "(default: delete them to save ~5-9 GB per run; keep if you need "
+             "mpileup.bcf for backfill_panel_genotypes.py later)",
     )
     bulk.add_argument(
         "--cell-line-map", metavar="PATH", default=None,

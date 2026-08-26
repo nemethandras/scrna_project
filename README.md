@@ -674,8 +674,7 @@ DB (their `bcftools mpileup` was run without `-T`, genome-wide, and `bcftools ca
 `--variants-only` or equivalent). These runs miss the 0/0 information that makes the
 concordance metric variant-count-agnostic.
 
-If the original `.mpileup.bcf` is still on disk (check `results/<run_id>/vcf/`), you can
-retroactively add 0/0 calls without re-aligning:
+If the original `.mpileup.bcf` is still on disk, you can retroactively add 0/0 calls without re-aligning. By default the pipeline deletes `.mpileup.bcf` once genotyping is done — pass `--keep-intermediates` when running the pipeline if you anticipate needing backfill later:
 
 ```bash
 # Preview what would be done (no changes):
@@ -927,8 +926,9 @@ against the full hg38 genome.
 | File | Description |
 |---|---|
 | `results/<run_id>/fastqc/<sample>[_1]_fastqc.html` | Per-read quality report |
-| `results/<run_id>/bam/<sample>.sorted.bam` | Sorted, indexed alignment |
+| `results/<run_id>/bam/<sample>.sorted.bam` | Sorted alignment — temporary by default, deleted after mpileup completes (see below) |
 | `results/<run_id>/bam/<sample>.flagstat.txt` | Mapping rate summary |
+| `results/<run_id>/vcf/<sample>.mpileup.bcf` | Per-position pileup — temporary by default, deleted after genotyping completes |
 | `results/<run_id>/vcf/<sample>.raw.vcf` | Unfiltered genotypes — temporary, deleted after DB load |
 | `results/<run_id>/vcf/<sample>.genotyped.vcf.gz` | Depth- and quality-filtered genotypes (bgzipped + tabix-indexed) |
 | `results/<run_id>/vcf/<sample>.panel_genotyped.vcf.gz` | Backfilled panel genotypes (created by `backfill_panel_genotypes.py` for legacy runs) |

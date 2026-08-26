@@ -84,6 +84,17 @@ filters:
   min_depth: 10
 
 # ─────────────────────────────────────────────
+# Intermediate file retention
+# ─────────────────────────────────────────────
+# When false (default), large intermediates are deleted automatically by
+# Snakemake once they are no longer needed:
+#   sorted.bam + .bai  (~1-3 GB each) — removed after mpileup completes
+#   mpileup.bcf        (~4-6 GB)      — removed after genotyping completes
+# Set to true (or pass --keep-intermediates) to retain them, e.g. when
+# you need mpileup.bcf for backfill_panel_genotypes.py later.
+keep_intermediates: false
+
+# ─────────────────────────────────────────────
 # Database
 # ─────────────────────────────────────────────
 # SQLite database file that accumulates variant calls across all runs.
