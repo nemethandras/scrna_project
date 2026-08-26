@@ -44,7 +44,7 @@ flowchart TD
 | Genome-wide variant discovery | Genotyping at ~7M common SNP positions (AF > 5%) only |
 | Only ALT calls stored | 0/0 (ref/ref) calls also stored — informative for sparse scRNA-seq |
 | QUAL filter applied to all sites | QUAL filter applies to ALT calls only; DP filters everything |
-| `.filtered.vcf` output | `.genotyped.vcf` output |
+| `.filtered.vcf` output | `.genotyped.vcf.gz` output (bgzipped + tabix-indexed) |
 | Silent overwrite on re-load | Duplicate `run_id` errors immediately; use `--force` to overwrite |
 
 ## Demultiplexing overview
@@ -420,7 +420,7 @@ If upstream results already exist, call the loading script directly:
 source .env && conda run -n scrna python scripts/load_to_db.py \
     --run-id MY_RUN \
     --sample MY_SAMPLE \
-    --vcf results/MY_RUN/vcf/MY_SAMPLE.genotyped.vcf \
+    --vcf results/MY_RUN/vcf/MY_SAMPLE.genotyped.vcf.gz \
     --flagstat results/MY_RUN/bam/MY_SAMPLE.flagstat.txt
 ```
 
@@ -696,7 +696,7 @@ The script:
 3. Reloads from the new VCF.
 
 Run metadata (mapping rate, Grist records) is not changed. New VCFs are written to
-`results/<run_id>/vcf/<sample>.panel_genotyped.vcf`.
+`results/<run_id>/vcf/<sample>.panel_genotyped.vcf.gz` (bgzipped + tabix-indexed); the intermediate `panel_raw.vcf` is deleted automatically after filtering.
 
 After the backfill completes, re-run `match_vireo.py` for any affected pools and raise
 `--min-concordance` to `0.80` (see threshold guidance below).
@@ -929,9 +929,9 @@ against the full hg38 genome.
 | `results/<run_id>/fastqc/<sample>[_1]_fastqc.html` | Per-read quality report |
 | `results/<run_id>/bam/<sample>.sorted.bam` | Sorted, indexed alignment |
 | `results/<run_id>/bam/<sample>.flagstat.txt` | Mapping rate summary |
-| `results/<run_id>/vcf/<sample>.raw.vcf` | Unfiltered genotypes at common SNP positions |
-| `results/<run_id>/vcf/<sample>.genotyped.vcf` | Depth- and quality-filtered genotypes (0/0, 0/1, 1/1) |
-| `results/<run_id>/vcf/<sample>.panel_genotyped.vcf` | Backfilled panel genotypes (created by `backfill_panel_genotypes.py` for legacy runs) |
+| `results/<run_id>/vcf/<sample>.raw.vcf` | Unfiltered genotypes — temporary, deleted after DB load |
+| `results/<run_id>/vcf/<sample>.genotyped.vcf.gz` | Depth- and quality-filtered genotypes (bgzipped + tabix-indexed) |
+| `results/<run_id>/vcf/<sample>.panel_genotyped.vcf.gz` | Backfilled panel genotypes (created by `backfill_panel_genotypes.py` for legacy runs) |
 | `results/<run_id>/db/<sample>.loaded` | Touch file confirming db load completed |
 | `results/demux/<demux_run_id>/cellsnp/` | cellSNP-lite per-cell pileup directory |
 | `results/demux/<demux_run_id>/vireo/` | Vireo donor clustering outputs |

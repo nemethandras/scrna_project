@@ -68,7 +68,7 @@ rule all:
         expand("results/{run}/fastqc/{sample}_2_fastqc.html", run=RUN_ID, sample=SAMPLES) if PAIRED else [],
         expand("results/{run}/bam/{sample}.sorted.bam.bai",   run=RUN_ID, sample=SAMPLES),
         expand("results/{run}/bam/{sample}.flagstat.txt",     run=RUN_ID, sample=SAMPLES),
-        expand("results/{run}/vcf/{sample}.genotyped.vcf",    run=RUN_ID, sample=SAMPLES),
+        expand("results/{run}/vcf/{sample}.genotyped.vcf.gz",  run=RUN_ID, sample=SAMPLES),
         [] if NO_DB else expand("results/{run}/db/{sample}.loaded", run=RUN_ID, sample=SAMPLES)
 
 
@@ -151,7 +151,7 @@ rule star_align:
         reads = star_reads,
         index = config["star_index_dir"]
     output:
-        bam     = "results/" + RUN_ID + "/star/{sample}/Aligned.out.bam",
+        bam     = temp("results/" + RUN_ID + "/star/{sample}/Aligned.out.bam"),
         star_log = "results/" + RUN_ID + "/star/{sample}/Log.final.out"
     threads:
         config["star"]["threads"]
@@ -273,6 +273,9 @@ rule bcftools_mpileup:
 
 # ─────────────────────────────────────────────
 # bcftools call — genotype all target positions.
+# Raw VCF is marked temp(): Snakemake deletes it
+# after load_to_database consumes it, so it never
+# accumulates on disk (typically 15–20 MB/sample).
 # --variants-only is intentionally omitted so
 # that 0/0 (ref/ref) calls are also emitted —
 # these are informative for donor matching when
@@ -282,7 +285,7 @@ rule bcftools_call:
     input:
         "results/" + RUN_ID + "/vcf/{sample}.mpileup.bcf"
     output:
-        "results/" + RUN_ID + "/vcf/{sample}.raw.vcf"
+        temp("results/" + RUN_ID + "/vcf/{sample}.raw.vcf")
     log:
         "logs/" + RUN_ID + "/bcftools_call/{sample}.log"
     params:
@@ -299,18 +302,22 @@ rule bcftools_call:
 
 
 # ─────────────────────────────────────────────
-# bcftools filter — apply quality thresholds.
+# bcftools filter — apply quality thresholds and
+# compress the output.  Produces a bgzipped,
+# tabix-indexed VCF so downstream tools (cyvcf2,
+# bcftools, IGV) can stream it without decompressing.
 # QUAL < min_qual is only applied to ALT calls
 # (GT != "0/0") because ref/ref positions have
 # QUAL ~ 0 by design and would otherwise all be
-# dropped. DP < min_depth drops all positions
+# dropped.  DP < min_depth drops all positions
 # regardless of genotype.
 # ─────────────────────────────────────────────
 rule bcftools_filter:
     input:
         "results/" + RUN_ID + "/vcf/{sample}.raw.vcf"
     output:
-        "results/" + RUN_ID + "/vcf/{sample}.genotyped.vcf"
+        vcf = "results/" + RUN_ID + "/vcf/{sample}.genotyped.vcf.gz",
+        tbi = "results/" + RUN_ID + "/vcf/{sample}.genotyped.vcf.gz.tbi"
     log:
         "logs/" + RUN_ID + "/bcftools_filter/{sample}.log"
     params:
@@ -320,9 +327,11 @@ rule bcftools_filter:
         """
         bcftools filter \
             -e 'DP < {params.min_depth} || (GT!="0/0" && QUAL < {params.min_qual})' \
-            -o {output} \
+            -O z \
+            -o {output.vcf} \
             {input} \
             2> {log}
+        tabix -p vcf {output.vcf} 2>> {log}
         """
 
 
@@ -332,7 +341,8 @@ rule bcftools_filter:
 # ─────────────────────────────────────────────
 rule load_to_database:
     input:
-        vcf      = "results/" + RUN_ID + "/vcf/{sample}.genotyped.vcf",
+        vcf      = "results/" + RUN_ID + "/vcf/{sample}.genotyped.vcf.gz",
+        raw_vcf  = "results/" + RUN_ID + "/vcf/{sample}.raw.vcf",
         flagstat = "results/" + RUN_ID + "/bam/{sample}.flagstat.txt",
         star_log = "results/" + RUN_ID + "/star/{sample}/Log.final.out"
     output:
