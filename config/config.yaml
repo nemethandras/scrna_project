@@ -28,12 +28,20 @@ fastq_dir: data/SRR1258218
 # single: expects {sample}_1.fastq only
 sequencing: single
 
+# Pipeline mode:
+#   sc  — single-cell RNA-seq (STAR aligner, splice-aware)  [default]
+#   wes — whole exome sequencing (BWA-MEM aligner, DNA)
+# Variant calling, filtering, and DB loading are identical in both modes.
+# Demultiplexing (demux:) is only meaningful in sc mode.
+mode: sc
+
 # ─────────────────────────────────────────────
 # Reference data
 # ─────────────────────────────────────────────
 reference_genome: data/reference/genome.fa
-annotation_gtf:   data/reference/genes.gtf
-star_index_dir:   data/reference/star_index_hg38_oh99/
+annotation_gtf:   data/reference/genes.gtf    # sc mode only
+star_index_dir:   data/reference/star_index_hg38_oh99/  # sc mode only
+bwa_index_dir:    data/reference/bwa_index_hg38/        # wes mode only
 
 # 1000 Genomes common SNP panel (AF > 5%, hg38).
 # common_snps_source: raw VCF with bare chrom names (1, 2, … X).
@@ -43,10 +51,13 @@ common_snps_source: validation/genome1K.phase3.SNP_AF5e2.chr1toX.hg38.vcf
 common_snps_vcf:    data/reference/genome1K.hg38.common_snps.vcf.gz
 
 # ─────────────────────────────────────────────
-# STAR alignment parameters
+# Alignment parameters (mode-dependent)
 # ─────────────────────────────────────────────
 star:
-  threads: 16
+  threads: 16   # sc mode
+
+bwa:
+  threads: 16   # wes mode
 
 # read_length - 1; override with --sjdb-overhang if reads are not 75bp
 sjdb_overhang: 74

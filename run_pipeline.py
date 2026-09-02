@@ -41,16 +41,19 @@ def build_snakemake_cmd(run_id, sample, args, fastq_dir=None):
     cell_line = lookup_cell_line(
         getattr(args, "cell_line_map", None) or DEFAULT_CELL_LINE_MAP, sample
     )
+    pipeline_mode = "wes" if getattr(args, "mode", "bulk") == "wes" else "sc"
     config_overrides = [
         f"run_id={run_id}",
         f"samples=[{sample}]",
         f"fastq_dir={fastq_dir}",
         f"sequencing={args.sequencing}",
+        f"mode={pipeline_mode}",
         f"reference_genome={args.reference}",
         f"annotation_gtf={args.gtf}",
         f"star_index_dir={args.star_index}",
         f"sjdb_overhang={args.sjdb_overhang}",
         f"genome_sa_index_nbases={args.genome_sa_index_nbases}",
+        f"bwa_index_dir={args.bwa_index}",
     ]
     if cell_line:
         config_overrides.append(f"cell_line={cell_line}")
@@ -400,8 +403,9 @@ examples:
     )
 
     parser.add_argument(
-        "--mode", choices=["bulk", "scrna"], default="bulk",
-        help="pipeline mode: bulk (FASTQ→genotype→DB) or scrna (BAM→cellsnp→demux) (default: bulk)",
+        "--mode", choices=["bulk", "scrna", "wes"], default="bulk",
+        help="pipeline mode: bulk (scRNA-seq FASTQ→genotype→DB), scrna (BAM→cellsnp→demux), "
+             "or wes (WES FASTQ→BWA→genotype→DB) (default: bulk)",
     )
 
     # ── Bulk args ──────────────────────────────────────────────────────────
@@ -445,6 +449,10 @@ examples:
         "--cell-line-map", metavar="PATH", default=None,
         help=f"CSV/TSV mapping sample_id → cell_line for automatic DB labelling "
              f"(default: {DEFAULT_CELL_LINE_MAP} if it exists)",
+    )
+    bulk.add_argument(
+        "--bwa-index", metavar="PATH", default="data/reference/bwa_index_hg38",
+        help="BWA index directory (wes mode only; default: data/reference/bwa_index_hg38)",
     )
 
     # ── scRNA args ─────────────────────────────────────────────────────────
