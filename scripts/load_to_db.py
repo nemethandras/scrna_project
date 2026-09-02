@@ -8,7 +8,7 @@ Usage:
     python scripts/load_to_db.py \
         --run-id SRR1258218_chr22 \
         --sample SRR1258218 \
-        --vcf results/SRR1258218_chr22/vcf/SRR1258218.genotyped.vcf.gz \
+        --vcf results/SRR1258218_chr22/vcf/SRR1258218.genotyped.vcf \
         --flagstat results/SRR1258218_chr22/bam/SRR1258218.flagstat.txt \
         --db variants.db
 
@@ -328,7 +328,7 @@ def main():
 
     # 2. Count positions in raw + genotyped VCF
     print("  Counting genotyped positions...")
-    raw_vcf_path   = args.vcf.replace(".genotyped.vcf.gz", ".raw.vcf").replace(".genotyped.vcf", ".raw.vcf")
+    raw_vcf_path   = args.vcf.replace(".genotyped.vcf", ".raw.vcf")
     raw_variants   = sum(1 for v in VCF(raw_vcf_path))
     filt_variants  = sum(1 for v in VCF(args.vcf))
     print(f"  Raw positions: {raw_variants:,}  After depth filter: {filt_variants:,}")

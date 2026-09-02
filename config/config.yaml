@@ -143,7 +143,12 @@ demux:
   donor_vcf: null    # e.g. results/demux/pool_ctr_v5/donor_ref.vcf
   # Minimum genotype concordance to accept a Vireo donor→DB match.
   # Donors below this threshold are labelled "vireo:<donor_id>" in the final output.
-  min_concordance: 0.4   # min ALT-recall for a Vireo→DB match
+  # Empirically calibrated from pairwise run-to-run overlap analysis (44 runs):
+  #   Pre-backfill genuine matches:  0.53–0.82  |  non-matches: 0.34–0.45
+  #   Post-backfill genuine matches: 0.83–0.90  |  non-matches: 0.70–0.75
+  # 0.55 sits cleanly above the pre-backfill non-match ceiling; raise to 0.80 after
+  # running backfill_panel_genotypes.py (see README § Tuning Vireo matching thresholds).
+  min_concordance: 0.55  # pre-backfill default; use 0.80 after backfill
   min_gap: 0.15          # best must beat second-best by at least this
   # Scoring thresholds
   min_depth: 10      # min reads at a position in a cell to use it for scoring

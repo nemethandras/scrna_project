@@ -44,7 +44,7 @@ flowchart TD
 | Genome-wide variant discovery | Genotyping at ~7M common SNP positions (AF > 5%) only |
 | Only ALT calls stored | 0/0 (ref/ref) calls also stored — informative for sparse scRNA-seq |
 | QUAL filter applied to all sites | QUAL filter applies to ALT calls only; DP filters everything |
-| `.filtered.vcf` output | `.genotyped.vcf.gz` output (bgzipped + tabix-indexed) |
+| `.filtered.vcf` output | `.genotyped.vcf` output |
 | Silent overwrite on re-load | Duplicate `run_id` errors immediately; use `--force` to overwrite |
 
 ## Demultiplexing overview
@@ -420,7 +420,7 @@ If upstream results already exist, call the loading script directly:
 source .env && conda run -n scrna python scripts/load_to_db.py \
     --run-id MY_RUN \
     --sample MY_SAMPLE \
-    --vcf results/MY_RUN/vcf/MY_SAMPLE.genotyped.vcf.gz \
+    --vcf results/MY_RUN/vcf/MY_SAMPLE.genotyped.vcf \
     --flagstat results/MY_RUN/bam/MY_SAMPLE.flagstat.txt
 ```
 
@@ -488,8 +488,8 @@ against reference genotypes in the DB).
 --run-ids ID ...        run_ids in the DB to compare against; default: all
 --load-db               write binomial scorer assignments to the SQLite database
 --n-donors N            number of donors to cluster in Vireo (default: auto-detect)
---min-concordance F     min genotype concordance for a Vireo donor→DB match (default: 0.80)
---min-gap F             concordance gap between best and second-best to accept a match (default: 0.10)
+--min-concordance F     min genotype concordance for a Vireo donor→DB match (default: 0.55; use 0.80 after backfill)
+--min-gap F             concordance gap between best and second-best to accept a match (default: 0.15)
 --min-depth N           min reads at a position in a cell to use it (default: 1)
 --min-positions N       min covered positions to attempt assignment (default: 200)
 --doublet-gap F         min LL gap between top two lines for a singlet call (default: 2.0)
@@ -695,7 +695,7 @@ The script:
 3. Reloads from the new VCF.
 
 Run metadata (mapping rate, Grist records) is not changed. New VCFs are written to
-`results/<run_id>/vcf/<sample>.panel_genotyped.vcf.gz` (bgzipped + tabix-indexed); the intermediate `panel_raw.vcf` is deleted automatically after filtering.
+`results/<run_id>/vcf/<sample>.panel_genotyped.vcf`; the intermediate `panel_raw.vcf` is deleted automatically after filtering.
 
 After the backfill completes, re-run `match_vireo.py` for any affected pools and raise
 `--min-concordance` to `0.80` (see threshold guidance below).
@@ -776,18 +776,26 @@ WHERE name = 'unknown_pool_ctr_v4_donor3';
 ### Tuning Vireo matching thresholds
 
 - **`--min-concordance`**: the minimum genotype concordance to accept a Vireo→DB match.
-  Two calibration regimes exist depending on DB state:
-  - **Legacy DB (ALT calls only, no 0/0)**: use `0.65`. The metric reduces to ALT-recall
-    and true matches score 0.65–0.85. Background (wrong-reference) scores are 0.30–0.55.
-  - **Full DB (0/0 calls present, after backfill)**: use `0.80`. With the full denominator,
-    true matches score 0.82–0.95 while the background rises to 0.65–0.75 (shared ref/ref
-    positions inflate all scores). The `--min-gap` criterion is especially important here
-    to guard against sparse-Vireo donors that score high against multiple references.
+  Thresholds are calibrated from two sources: (1) pairwise run-to-run Jaccard/containment
+  analysis across 44 runs (same-donor pairs median containment 0.70, different-donor pairs
+  median 0.41, with negligible overlap between the two distributions), and (2) observed
+  concordance values from actual Vireo matching runs in this project.
+
+  Two regimes exist depending on DB state:
+  - **Pre-backfill (ALT calls only, no 0/0)**: use `0.55`. Observed genuine matches score
+    0.53–0.82; non-matches score 0.34–0.45. The default `0.55` sits above the non-match
+    ceiling while capturing all real matches.
+  - **Post-backfill (0/0 calls present)**: use `0.80`. With the full panel denominator,
+    genuine matches score 0.83–0.90 while non-matching donors in the same pool score
+    0.70–0.75 (shared ref/ref positions inflate all concordances). The `--min-gap`
+    criterion is critical here to distinguish true matches from the inflated background.
+
   Donors from small cell clusters (< 500 cells) may score lower due to sparse Vireo
-  genotypes (mostly 0/0 calls); use `--unique` to still assign them.
+  genotypes; use `--unique` to still assign them via bipartite matching.
 - **`--min-gap`**: the minimum margin between best and second-best concordance.
-  A gap of `0.10` is appropriate for the genotype-concordance metric; increase to
-  `0.15` if you have very similar cell lines in the DB.
+  `0.15` is empirically appropriate: observed genuine-match gaps are 0.17–0.28 pre-backfill
+  and 0.10–0.20 post-backfill. Increase if you have genetically similar lines in the DB
+  (e.g. same-donor pairs like SW480/SW620 where the gap naturally narrows).
 - **Small clusters**: donors with < 500 cells will typically receive
   `confidence=low`. The assignment is still the best available given the data
   — flag it in downstream analysis rather than discarding it.
@@ -818,8 +826,8 @@ demux:
   # donor_vcf: path to a pre-built multi-sample donor VCF (overrides make_donor_vcf if set).
   known_lines: []       # e.g. [RKO, HCT116, HT29, LIM1215, CACO2, HCT8, DLD1]
   donor_vcf: null       # e.g. results/demux/pool_ctr_v5/donor_ref.vcf
-  min_concordance: 0.80  # min genotype concordance for Vireo→DB match (genotype-free only)
-  min_gap: 0.10          # concordance gap required for a confident match
+  min_concordance: 0.55  # pre-backfill default; raise to 0.80 after backfill_panel_genotypes.py
+  min_gap: 0.15          # concordance gap required for a confident match
   min_depth: 1
   min_positions: 200
   doublet_gap: 2.0
@@ -930,8 +938,8 @@ against the full hg38 genome.
 | `results/<run_id>/bam/<sample>.flagstat.txt` | Mapping rate summary |
 | `results/<run_id>/vcf/<sample>.mpileup.bcf` | Per-position pileup — temporary by default, deleted after genotyping completes |
 | `results/<run_id>/vcf/<sample>.raw.vcf` | Unfiltered genotypes — temporary, deleted after DB load |
-| `results/<run_id>/vcf/<sample>.genotyped.vcf.gz` | Depth- and quality-filtered genotypes (bgzipped + tabix-indexed) |
-| `results/<run_id>/vcf/<sample>.panel_genotyped.vcf.gz` | Backfilled panel genotypes (created by `backfill_panel_genotypes.py` for legacy runs) |
+| `results/<run_id>/vcf/<sample>.genotyped.vcf` | Depth- and quality-filtered genotypes |
+| `results/<run_id>/vcf/<sample>.panel_genotyped.vcf` | Backfilled panel genotypes (created by `backfill_panel_genotypes.py` for legacy runs) |
 | `results/<run_id>/db/<sample>.loaded` | Touch file confirming db load completed |
 | `results/demux/<demux_run_id>/cellsnp/` | cellSNP-lite per-cell pileup directory |
 | `results/demux/<demux_run_id>/vireo/` | Vireo donor clustering outputs |

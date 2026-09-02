@@ -34,11 +34,12 @@ def parse_args():
                    help="run_ids to compare against, or 'all' (default: all)")
     p.add_argument("--output",     required=True,
                    help="output TSV path for donor→cell_line matches")
-    p.add_argument("--min-concordance", type=float, default=0.65, metavar="F",
-                   help="min genotype concordance to accept a match (default: 0.65)")
-    p.add_argument("--min-gap", type=float, default=0.10, metavar="F",
+    p.add_argument("--min-concordance", type=float, default=0.55, metavar="F",
+                   help="min genotype concordance to accept a match (default: 0.55 pre-backfill; "
+                        "use 0.80 after backfill_panel_genotypes.py)")
+    p.add_argument("--min-gap", type=float, default=0.15, metavar="F",
                    help="min gap between best and second-best concordance to accept a match "
-                        "(default: 0.10)")
+                        "(default: 0.15)")
     p.add_argument("--min-positions", type=int, default=200,
                    help="min shared positions to attempt matching (default: 200)")
     p.add_argument("--unique", action="store_true",

@@ -4,7 +4,7 @@ processed without the -T panel filter (genome-wide mpileup, variants-only).
 
 For each affected run:
   1. bcftools call -m -T <panel> on the existing mpileup.bcf  → panel_raw.vcf
-  2. bcftools filter (DP / QUAL thresholds)                   → panel_genotyped.vcf.gz + .tbi
+  2. bcftools filter (DP / QUAL thresholds)                   → panel_genotyped.vcf
   3. Delete old genotype_calls from SQLite, reload from new VCF
 
 Run metadata (mapping rate, etc.) is unchanged. Grist is not updated.
@@ -147,7 +147,7 @@ def panel_vcf_paths(results_root, run_id):
     sample   = bcf_to_run_id(run_id)
     vcf_dir  = Path(results_root) / run_id / "vcf"
     raw      = vcf_dir / f"{sample}.panel_raw.vcf"
-    filtered = vcf_dir / f"{sample}.panel_genotyped.vcf.gz"
+    filtered = vcf_dir / f"{sample}.panel_genotyped.vcf"
     bcf      = vcf_dir / f"{sample}.mpileup.bcf"
     return bcf, raw, filtered
 
@@ -190,16 +190,15 @@ def main():
             bcf,
         ], dry_run=args.dry_run)
 
-        # Step 2: depth / quality filter → bgzipped output + tabix index
+        # Step 2: depth / quality filter
         print(f"  Step 2: bcftools filter -> {filt_vcf}")
         run_cmd([
             "bcftools", "filter",
             "-e", f'DP < {args.min_depth} || (GT!="0/0" && QUAL < {args.min_qual})',
-            "-O", "z",
+            "-O", "v",
             "-o", filt_vcf,
             raw_vcf,
         ], dry_run=args.dry_run)
-        run_cmd(["tabix", "-p", "vcf", filt_vcf], dry_run=args.dry_run)
 
         if not args.dry_run and raw_vcf.exists():
             raw_vcf.unlink()

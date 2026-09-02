@@ -76,7 +76,7 @@ rule all:
         expand("results/{run}/fastqc/{sample}_2_fastqc.html", run=RUN_ID, sample=SAMPLES) if PAIRED else [],
         expand("results/{run}/bam/{sample}.sorted.bam.bai", run=RUN_ID, sample=SAMPLES) if KEEP_INTERMEDIATES else [],
         expand("results/{run}/bam/{sample}.flagstat.txt",    run=RUN_ID, sample=SAMPLES),
-        expand("results/{run}/vcf/{sample}.genotyped.vcf.gz",  run=RUN_ID, sample=SAMPLES),
+        expand("results/{run}/vcf/{sample}.genotyped.vcf",  run=RUN_ID, sample=SAMPLES),
         [] if NO_DB else expand("results/{run}/db/{sample}.loaded", run=RUN_ID, sample=SAMPLES)
 
 
@@ -324,8 +324,7 @@ rule bcftools_filter:
     input:
         "results/" + RUN_ID + "/vcf/{sample}.raw.vcf"
     output:
-        vcf = "results/" + RUN_ID + "/vcf/{sample}.genotyped.vcf.gz",
-        tbi = "results/" + RUN_ID + "/vcf/{sample}.genotyped.vcf.gz.tbi"
+        "results/" + RUN_ID + "/vcf/{sample}.genotyped.vcf"
     log:
         "logs/" + RUN_ID + "/bcftools_filter/{sample}.log"
     params:
@@ -335,11 +334,10 @@ rule bcftools_filter:
         """
         bcftools filter \
             -e 'DP < {params.min_depth} || (GT!="0/0" && QUAL < {params.min_qual})' \
-            -O z \
-            -o {output.vcf} \
+            -O v \
+            -o {output} \
             {input} \
             2> {log}
-        tabix -p vcf {output.vcf} 2>> {log}
         """
 
 
@@ -349,7 +347,7 @@ rule bcftools_filter:
 # ─────────────────────────────────────────────
 rule load_to_database:
     input:
-        vcf      = "results/" + RUN_ID + "/vcf/{sample}.genotyped.vcf.gz",
+        vcf      = "results/" + RUN_ID + "/vcf/{sample}.genotyped.vcf",
         raw_vcf  = "results/" + RUN_ID + "/vcf/{sample}.raw.vcf",
         flagstat = "results/" + RUN_ID + "/bam/{sample}.flagstat.txt",
         star_log = "results/" + RUN_ID + "/star/{sample}/Log.final.out"
