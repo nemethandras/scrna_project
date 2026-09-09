@@ -15,33 +15,47 @@ flowchart TD
     SETUP[normalize_snp_panel\nadd chr prefix · bgzip · tabix]
     SNP --> SETUP
 
-    A([FASTQ / FASTQ.GZ]) --> B[FastQC\nquality report]
-    A --> SC{mode?}
-    SC -->|bulk| C[STAR align\nBAM unsorted\nsplice-aware · --readFilesCommand zcat]
-    SC -->|wes| CW[BWA-MEM align\nBAM unsorted\nDNA-mode]
+    MODE{mode?}
 
-    C  --> D[samtools sort\nsorted BAM]
+    A([FASTQ / FASTQ.GZ]) --> MODE
+    MODE -->|bulk| C[STAR align\nBAM unsorted\nsplice-aware]
+    MODE -->|wes| CW[BWA-MEM align\nBAM unsorted\nDNA-mode]
+    MODE -->|scrna| SC_IN([CellRanger BAM\n+ barcodes.tsv.gz])
+
+    C  --> D[samtools sort + index]
     CW --> D
-    D --> E[samtools index\nBAM index]
     D --> F[samtools flagstat\nmapping rate QC\n⚠ aborts if below threshold]
 
     SETUP --> G
-    E --> G[bcftools mpileup\npileup at common SNP positions only]
+    D --> G[bcftools mpileup\npileup at common SNP positions only]
     G --> H[bcftools call\ngenotype all positions\n0/0  0/1  1/1]
-    H --> I[bcftools filter\nDP filter all · QUAL filter ALT only]
+    H --> I[bcftools filter\nDP · QUAL thresholds]
 
-    C -->|Log.final.out sc only| J
+    C -->|Log.final.out\nbulk only| J
     F --> J
     I --> J[load_to_database]
 
     J --> K[(SQLite\nvariants.db)]
     J --> L[(Grist\nRuns · QC_Summary · Samples)]
 
+    SC_IN --> P[cellsnp-lite\nper-cell pileup at SNP positions]
+    SETUP --> P
+    P --> V[Vireo\ndonor clustering]
+    P --> S[demux scorer\nbinomial log-likelihood]
+    K --> S
+    V --> M[match_vireo\nVireo donor ↔ DB reference]
+    K --> M
+    S --> G2[merge_demux]
+    V --> G2
+    M --> G2
+    G2 --> FA([final_assignments.tsv\nbarcode · cell_line · confidence])
+
     style K fill:#2d6a4f,color:#fff
     style L fill:#1d3557,color:#fff
     style F fill:#e63946,color:#fff
     style SETUP fill:#457b9d,color:#fff
     style CW fill:#6d597a,color:#fff
+    style FA fill:#457b9d,color:#fff
 ```
 
 ### What changed from v1
