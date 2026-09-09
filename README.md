@@ -1,8 +1,11 @@
-# scRNA-seq Variant Calling & Demultiplexing Pipeline
+# scRNA-seq / WES Variant Calling & Demultiplexing Pipeline
 
 A Snakemake pipeline for quality control, alignment, genotyping at common SNP
-positions, database loading, and cell line demultiplexing from RNA-seq reads
-(single-end or paired-end).
+positions, database loading, and cell line demultiplexing. Supports two
+alignment modes: **sc** (single-cell RNA-seq, STAR aligner) and **wes**
+(whole-exome sequencing, BWA-MEM aligner). Both modes share the same variant
+calling and database loading steps after alignment. FASTQ inputs can be plain
+(`.fastq`) or gzip-compressed (`.fastq.gz`) — the pipeline detects automatically.
 
 ## Pipeline overview
 
@@ -12,10 +15,13 @@ flowchart TD
     SETUP[normalize_snp_panel\nadd chr prefix · bgzip · tabix]
     SNP --> SETUP
 
-    A([FASTQ]) --> B[FastQC\nquality report]
-    A          --> C[STAR align\nBAM unsorted]
+    A([FASTQ / FASTQ.GZ]) --> B[FastQC\nquality report]
+    A --> SC{mode?}
+    SC -->|sc| C[STAR align\nBAM unsorted\nsplice-aware · --readFilesCommand zcat]
+    SC -->|wes| CW[BWA-MEM align\nBAM unsorted\nDNA-mode]
 
-    C --> D[samtools sort\nsorted BAM]
+    C  --> D[samtools sort\nsorted BAM]
+    CW --> D
     D --> E[samtools index\nBAM index]
     D --> F[samtools flagstat\nmapping rate QC\n⚠ aborts if below threshold]
 
@@ -24,7 +30,7 @@ flowchart TD
     G --> H[bcftools call\ngenotype all positions\n0/0  0/1  1/1]
     H --> I[bcftools filter\nDP filter all · QUAL filter ALT only]
 
-    C -->|Log.final.out| J
+    C -->|Log.final.out sc only| J
     F --> J
     I --> J[load_to_database]
 
@@ -35,6 +41,7 @@ flowchart TD
     style L fill:#1d3557,color:#fff
     style F fill:#e63946,color:#fff
     style SETUP fill:#457b9d,color:#fff
+    style CW fill:#6d597a,color:#fff
 ```
 
 ### What changed from v1
@@ -209,7 +216,8 @@ erDiagram
 ## Dependencies
 
 - [Snakemake](https://snakemake.readthedocs.io) >= 7
-- [STAR](https://github.com/alexdobin/STAR)
+- [STAR](https://github.com/alexdobin/STAR) — sc mode only
+- [BWA](https://github.com/lh3/bwa) — wes mode only
 - [FastQC](https://www.bioinformatics.babraham.ac.uk/projects/fastqc/)
 - [samtools](http://www.htslib.org/)
 - [bcftools](http://www.htslib.org/) (with tabix)
@@ -321,12 +329,15 @@ source VCF changes.
 
 ## Running the pipeline
 
-`run_pipeline.py` has two modes selected with `--mode`:
+`run_pipeline.py` has three modes selected with `--mode`:
 
-| Mode | What it does |
-|---|---|
-| `bulk` (default) | FASTQ → align → genotype at common SNPs → load to DB. Builds reference genotypes for known cell lines. |
-| `scrna` | BAM → cellsnp-lite → demux scorer → `assignments.tsv`. Assigns cell barcodes from a pooled experiment to cell lines already in the DB. |
+| Mode | Aligner | What it does |
+|---|---|---|
+| `bulk` (default) | STAR | FASTQ → align (sc RNA-seq) → genotype at common SNPs → load to DB |
+| `wes` | BWA-MEM | FASTQ → align (whole-exome DNA) → genotype at common SNPs → load to DB |
+| `scrna` | — | BAM → cellsnp-lite → demux scorer → `assignments.tsv`. Assigns cell barcodes to cell lines already in the DB |
+
+`bulk` and `wes` produce identical downstream outputs (VCF, DB rows) — the only difference is the aligner. Use `wes` for WES/WGS DNA samples; use `bulk` for scRNA-seq reference profiles.
 
 Both modes run **in the background by default** — the process detaches so it
 keeps running if you close the terminal.
@@ -400,6 +411,47 @@ Check batch progress:
 ```bash
 tail -f logs/batch.log
 ```
+
+### WES mode
+
+WES mode uses BWA-MEM for alignment and is otherwise identical to bulk mode.
+Use it for whole-exome or whole-genome DNA samples.
+
+**One-time setup — build the BWA index** (takes ~90 min, only needed once):
+
+```bash
+conda run -n scrna bwa index \
+    -p data/reference/bwa_index_hg38/genome \
+    data/reference/genome.fa
+```
+
+The index is stored at `data/reference/bwa_index_hg38/`. Override the path
+with `--bwa-index` if you have it elsewhere.
+
+**WES-specific options:**
+```
+--bwa-index PATH    BWA index prefix directory (default: data/reference/bwa_index_hg38)
+--sequencing        always paired for WES (pass --sequencing paired)
+```
+
+**WES examples:**
+
+```bash
+# single organoid sample
+source .env && python run_pipeline.py --mode wes \
+    --run-id B2006_wes_v1 --sample B2006 \
+    --fastq-dir data/B2006 --sequencing paired
+
+# batch — all 10 organoid samples
+source .env && python run_pipeline.py --mode wes \
+    --samples B2006 B2040 B2057 C2019 C2153 C2159 IKPM IKPT NCO_A NCO \
+    --run-id-suffix _wes_v1 --sequencing paired \
+    --fastq-dir data/
+```
+
+> **Input files:** WES mode accepts both `.fastq` and `.fastq.gz`. Multi-lane
+> data should be concatenated before running: `cat lane1.gz lane2.gz lane3.gz > sample_1.fastq.gz`
+> produces a valid gzip file without decompression.
 
 ### Duplicate run IDs
 
@@ -884,16 +936,26 @@ conda run -n scrna pip install ipywidgets plotly jupyterlab
 
 ### FASTQ files
 
-Place reads in a dedicated folder, one folder per sample. For single-end data
-the pipeline accepts either `<sample>.fastq` or `<sample>_1.fastq`. For
-paired-end both `_1` and `_2` files are required:
+Place reads in a dedicated folder, one folder per sample. The pipeline accepts
+both plain and gzip-compressed FASTQ — `.fastq.gz` variants are probed first,
+so you can mix compressed and uncompressed samples in the same run.
 
 ```
 data/
 └── MY_SAMPLE/
-    ├── MY_SAMPLE.fastq        # single-end (or MY_SAMPLE_1.fastq)
-    ├── MY_SAMPLE_1.fastq      # paired-end R1
-    └── MY_SAMPLE_2.fastq      # paired-end R2
+    ├── MY_SAMPLE.fastq.gz     # single-end compressed (preferred)
+    ├── MY_SAMPLE.fastq        # single-end uncompressed (also accepted)
+    ├── MY_SAMPLE_1.fastq.gz   # paired-end R1 compressed
+    ├── MY_SAMPLE_2.fastq.gz   # paired-end R2 compressed
+    ├── MY_SAMPLE_1.fastq      # paired-end R1 uncompressed
+    └── MY_SAMPLE_2.fastq      # paired-end R2 uncompressed
+```
+
+For multi-lane data, concatenate lanes before running. Concatenated gzip is valid:
+
+```bash
+cat lane1_R1.fastq.gz lane2_R1.fastq.gz lane3_R1.fastq.gz > MY_SAMPLE_1.fastq.gz
+cat lane1_R2.fastq.gz lane2_R2.fastq.gz lane3_R2.fastq.gz > MY_SAMPLE_2.fastq.gz
 ```
 
 ### Reference files
@@ -905,12 +967,14 @@ automatically on first run if the directory does not exist:
 data/reference/
 ├── genome.fa
 ├── genes.gtf
-├── star_index_hg38_oh99/              # built automatically
+├── star_index_hg38_oh99/              # built automatically (sc mode)
+├── bwa_index_hg38/                    # built once manually (wes mode)
+│   └── genome.{amb,ann,bwt,pac,sa}
 └── genome1K.hg38.common_snps.vcf.gz  # built by normalize_snp_panel (one-time)
 ```
 
 Naming convention: `star_index_<genome>_oh<overhang>`, where overhang = read
-length − 1.
+length − 1. The BWA index is built with `bwa index -p bwa_index_hg38/genome genome.fa`.
 
 ### Changing read length or genome
 
