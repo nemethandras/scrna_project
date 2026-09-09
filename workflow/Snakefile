@@ -247,7 +247,7 @@ if MODE == "wes":
     rule bwa_align:
         input:
             r1    = lambda wc: get_r1(FASTQ_DIR, wc.sample),
-            r2    = lambda wc: f"{FASTQ_DIR}/{wc.sample}_2.fastq",
+            r2    = lambda wc: get_r2(FASTQ_DIR, wc.sample),
             index = config["bwa_index_dir"]
         output:
             maybe_temp("results/" + RUN_ID + "/bam/{sample}.unsorted.bam")
