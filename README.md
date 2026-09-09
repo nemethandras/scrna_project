@@ -17,7 +17,7 @@ flowchart TD
 
     A([FASTQ / FASTQ.GZ]) --> B[FastQC\nquality report]
     A --> SC{mode?}
-    SC -->|sc| C[STAR align\nBAM unsorted\nsplice-aware · --readFilesCommand zcat]
+    SC -->|bulk| C[STAR align\nBAM unsorted\nsplice-aware · --readFilesCommand zcat]
     SC -->|wes| CW[BWA-MEM align\nBAM unsorted\nDNA-mode]
 
     C  --> D[samtools sort\nsorted BAM]
