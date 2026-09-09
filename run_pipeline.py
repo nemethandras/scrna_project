@@ -592,9 +592,9 @@ examples:
     args = parser.parse_args()
 
     # ── Validate ───────────────────────────────────────────────────────────
-    if args.mode == "bulk":
+    if args.mode in ("bulk", "wes"):
         if not args.sample and not args.samples:
-            parser.error("--mode bulk requires --sample or --samples")
+            parser.error(f"--mode {args.mode} requires --sample or --samples")
         if args.sample and not args.run_id:
             parser.error("--run-id is required with --sample")
         if args.samples and not args.run_id_suffix:
@@ -611,7 +611,7 @@ examples:
             parser.error("--barcodes is required when --bam is provided")
 
     # ── Dispatch ───────────────────────────────────────────────────────────
-    if args.mode == "bulk":
+    if args.mode in ("bulk", "wes"):
         if args.sample:
             run_single(args.run_id, args.sample, args, args.fastq_dir)
         else:
