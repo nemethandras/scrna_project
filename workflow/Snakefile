@@ -3,6 +3,11 @@
 # ─────────────────────────────────────────────
 import os
 
+# Ensure the scrna conda env tools are on PATH regardless of how snakemake was launched
+_CONDA_BIN = "/home/nemeth/miniforge3/envs/scrna/bin"
+if _CONDA_BIN not in os.environ.get("PATH", ""):
+    os.environ["PATH"] = _CONDA_BIN + ":" + os.environ.get("PATH", "")
+
 configfile: "config/config.yaml"
 
 SAMPLES            = config["samples"]
@@ -673,7 +678,8 @@ rule vireo_demux:
             if config.get("demux", {}).get("n_donors") and not _known_lines() else ""
         ),
         d_flag = lambda wildcards: (
-            f"-d {_demux_cfg_opt('donor_vcf') or f'results/demux/{wildcards.demux_run_id}/donor_ref.vcf'}"
+            "-d " + (_demux_cfg_opt("donor_vcf") or
+                     "results/demux/" + wildcards.demux_run_id + "/donor_ref.vcf")
             if _known_lines() or _demux_cfg_opt("donor_vcf") else ""
         ),
         geno_tag = lambda _: "--genoTag GT" if (_known_lines() or _demux_cfg_opt("donor_vcf")) else ""
