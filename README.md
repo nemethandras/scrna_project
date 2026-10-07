@@ -266,8 +266,7 @@ scrna_project/
 │   ├── match_vcf.py                 # match an unknown VCF against the database
 │   └── test_grist.py                # inspect Grist table schema
 ├── data/
-│   └── cell_line_map.csv        # Run (SRR accession) → cell_line mapping for auto-labelling
-├── data/
+│   ├── cell_line_map.csv        # Run (SRR accession) → cell_line mapping for auto-labelling
 │   ├── reference/               # genome FASTA, GTF, STAR index, and SNP panel
 │   └── <sample>/                # one folder per sample: <sample>_1.fastq [_2.fastq]
 ├── results/
@@ -917,10 +916,10 @@ snakemake results/demux/pool_ctr_001/assignments.tsv
   is −1.0 to −1.5. Cells scoring much worse (e.g. < −3.0) are likely poor
   quality or from a line not in the DB.
 
-## Exploring results in the notebook
+## Exploring results in the notebooks
 
-Open `notebooks/01_explore_fastq.ipynb` with the `scrna` kernel active. The
-notebook pulls data directly from SQLite — no manual configuration needed.
+The results are split across four Jupyter notebooks, all using the `scrna`
+kernel and pulling data directly from SQLite — no manual configuration needed.
 
 **Requirements** (install once if not already present):
 
@@ -928,18 +927,45 @@ notebook pulls data directly from SQLite — no manual configuration needed.
 conda run -n scrna pip install ipywidgets plotly jupyterlab
 ```
 
-**Sections:**
+### `notebooks/01_explore_fastq.ipynb` — Full overview
+
+The original combined notebook. Contains all sections listed below in one place.
+Use this for a quick end-to-end look or as a reference.
+
+### `notebooks/02_variants.ipynb` — Variant analysis
+
+Covers sc/bulk RNA-seq and WES runs in separate panels:
 
 | Section | What it shows |
 |---|---|
 | Cross-sample QC overview | Mapping rate (with 85% threshold) and filtered variant counts for every run |
 | Per-run deep-dive | Dropdown — depth distribution, QUAL scores, variant types, allele frequency spectrum, variants per chromosome, depth vs QUAL scatter |
 | Cross-sample comparison | Two dropdowns — variant overlap, Jaccard similarity, side-by-side depth and AF plots |
-| Variant overlap heatmap | Jaccard and containment heatmaps between all cell lines; similarity distribution curves (KDE + median) for the upper-triangle Jaccard pairs and all off-diagonal containment values |
-| scRNA demultiplexing results | Dropdown — cell composition bar (DB-matched + unmatched vireo donors), doublet pair heatmap, Vireo probability violins, concordance & gap bars per donor |
-| Validation — reference-guided Vireo | Cell composition, prob_max violins, and n_vars violins from `validation/donor_ids.tsv` (reference-guided Vireo run on Pool_ctr with known cell-line genotypes) |
-| Concordance profiles | Full concordance matrix plots — best/worst donor bar charts (Plot A), per-donor horizontal profiles for best/median/worst donors (Plot B), concordance score distribution histograms (Plot C) |
-| STAR alignment QC | Annotated splice % and % reads too short per sample (read from STAR log files) |
+| Variant overlap heatmap | Jaccard and containment heatmaps; sc/bulk and WES shown separately. Wide matrices scroll horizontally |
+| Similarity distributions | Same-donor vs different-donor Jaccard and containment distributions (sc/bulk); overlay comparison adding WES all-pairs as a third line |
+
+Same-donor pairs are defined by biological knowledge:
+SW480/SW620 (same patient), IS1/IS2/IS3 (same patient),
+COLO201/COLO205 (same patient), HCT8/HCT15/DLD1 (shared parental line).
+
+### `notebooks/03_scrna_demux.ipynb` — scRNA demultiplexing results
+
+| Section | What it shows |
+|---|---|
+| scRNA demultiplexing results | Dropdown — cell composition bar (high/low/guided confidence, vireo-only, doublets, unassigned), doublet pair heatmap, Vireo probability violins, concordance & gap bars per donor (unguided mode only) |
+| Concordance profiles | For unguided runs with `donor_matches.tsv`: Plot A — best/worst donor bar charts; Plot B — per-donor horizontal concordance profiles for best/median/worst donors; Plot C — concordance score distribution histograms |
+| Validation — reference-guided Vireo | Cell composition, prob_max violins, and n_vars violins from `validation/donor_ids.tsv` (Pool_ctr ground-truth reference-guided run) |
+
+### `notebooks/04_wes.ipynb` — WES organoid analysis
+
+| Section | What it shows |
+|---|---|
+| QC overview | Mapping rate and filtered variant counts for WES runs |
+| Per-run deep-dive | Same panels as `02_variants.ipynb`, WES runs only |
+| Cross-sample comparison | Pairwise variant overlap and Jaccard similarity between WES organoids |
+| WES overlap heatmap | Jaccard and containment heatmaps for WES runs |
+| WES similarity distributions | All-pairs Jaccard and containment distributions (no same-donor pairs — all organoids are unrelated donors) |
+| STAR alignment QC | Annotated splice % and % reads too short (sc/bulk runs, read from STAR log files) |
 | Raw SQL explorer | Text box to run any query against the database |
 
 > **Note:** If the pipeline is actively loading results to the database in the
