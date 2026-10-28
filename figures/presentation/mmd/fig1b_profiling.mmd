@@ -1,0 +1,16 @@
+flowchart TD
+    A(["FASTQ<br>sc RNA-seq or WES"])
+    B1["STAR align<br>(sc / bulk)"]
+    B2["BWA-MEM align<br>(WES / WGS)"]
+    C["samtools sort + index"]
+    QC{"mapping rate<br>≥ 85%?"}
+    D["bcftools mpileup<br>SNP panel positions only"]
+    E["bcftools call<br>0/0 · 0/1 · 1/1"]
+    F["bcftools filter<br>DP ≥ 10 · QUAL ≥ 30"]
+    G[("SQLite DB")]
+    A --> B1 & B2 --> C --> QC
+    QC -->|pass| D --> E --> F --> G
+    QC -->|fail| STOP(["Pipeline abort"])
+    style QC fill:#E63946,color:#fff
+    style STOP fill:#E63946,color:#fff
+    style G fill:#1F7A7A,color:#fff

@@ -1,0 +1,17 @@
+flowchart TD
+    CR(["CellRanger BAM<br>+ barcodes.tsv.gz"])
+    CS["cellsnp-lite<br>per-cell pileup"]
+    VG["Vireo<br>donor clustering"]
+    VU["genotype-free<br>(unguided)"]
+    GD["reference-guided<br>(known cell lines)"]
+    MV["match_vireo.py<br>concordance + Hungarian"]
+    MG["donor names<br>= cell line names"]
+    ME["merge_demux.py"]
+    FA(["final_assignments.tsv<br>barcode · cell_line · confidence"])
+    CR --> CS --> VG
+    VG --> VU --> MV --> ME
+    VG --> GD --> MG --> ME
+    ME --> FA
+    style FA fill:#1B3A3F,color:#fff
+    style VU fill:#457B9D,color:#fff
+    style GD fill:#1F7A7A,color:#fff

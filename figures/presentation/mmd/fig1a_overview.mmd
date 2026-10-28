@@ -1,0 +1,8 @@
+flowchart LR
+    A(["FASTQ / BAM<br>input data"])
+    B["Genotype at<br>common SNPs<br>(1000G, AF > 5%)"]
+    C[("SQLite DB<br>variants.db")]
+    D["Cell-line<br>assignment<br>final_assignments.tsv"]
+    A --> B --> C --> D
+    style C fill:#1F7A7A,color:#fff
+    style D fill:#1B3A3F,color:#fff
