@@ -311,7 +311,33 @@ separate places:
 `run_pipeline.py` can be called from any project folder; code paths are
 resolved from the repository, data paths from the folder you are in.
 
-### Option A — on the lab server (recommended)
+### Option A — on the lab server: use the shared install (recommended)
+
+Nothing to install. The shared directory holds a stable copy of the code
+(`code/`), a ready-made conda environment (`env/`) and a launcher:
+
+```bash
+mkdir -p ~/my_project/data && cd ~/my_project
+# put FASTQs in data/<sample>/  (see "Preparing input data")
+/groups/nils/data/scrna_pipeline/bin/scrna-pipeline --mode bulk \
+    --sample SRR5071686 --run-id SRR5071686_hg38 --dry-run
+```
+
+Add `export PATH=/groups/nils/data/scrna_pipeline/bin:$PATH` to `~/.bashrc`
+to type just `scrna-pipeline`. For notebooks and the helper scripts, activate
+the shared env: `conda activate /groups/nils/data/scrna_pipeline/env`.
+
+**Updating the shared install** (maintainers only): merge to the branch the
+shared copy tracks, then
+
+```bash
+git -C /groups/nils/data/scrna_pipeline/code pull
+```
+
+The environment only needs rebuilding when `environment.yml` changes:
+`mamba env update -p /groups/nils/data/scrna_pipeline/env -f environment.yml`.
+
+### Option A2 — on the lab server: your own clone (for development)
 
 ```bash
 git clone https://github.com/nemethandras/scrna_project.git ~/scrna_project

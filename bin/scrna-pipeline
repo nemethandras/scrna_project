@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Launcher for the lab-wide install: <root>/code (this repo) + <root>/env (conda env).
+# Usage: scrna-pipeline <run_pipeline.py arguments>
+set -euo pipefail
+CODE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+ROOT="$(dirname "$CODE")"
+# The checkout belongs to another user, so git needs safe.directory to describe it.
+export SCRNA_PIPELINE_VERSION="${SCRNA_PIPELINE_VERSION:-$(git -c safe.directory="$CODE" -C "$CODE" describe --always --dirty --tags 2>/dev/null || echo unknown)}"
+exec "$ROOT/env/bin/python" "$CODE/run_pipeline.py" "$@"
