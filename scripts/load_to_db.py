@@ -18,6 +18,7 @@ Use --force to overwrite an existing run (deletes all prior data for that run_id
 
 import os
 import re
+import getpass
 import sqlite3
 import argparse
 import subprocess
@@ -26,6 +27,8 @@ from dotenv import load_dotenv
 from grist_api import GristDocAPI
 from cyvcf2 import VCF
 from validate_vcf import validate_external_vcf
+from db_lock import write_lock
+from shared_paths import DEFAULT_DB, REFERENCE_GENOME
 
 load_dotenv()
 
@@ -39,8 +42,8 @@ def parse_args():
     p.add_argument("--sample",    required=True)
     p.add_argument("--vcf",       required=True, help="path to genotyped VCF")
     p.add_argument("--flagstat",  required=True, help="path to samtools flagstat output")
-    p.add_argument("--db",        default="results/variants.db", help="SQLite database path")
-    p.add_argument("--reference", default="data/reference/genome.fa")
+    p.add_argument("--db",        default=DEFAULT_DB, help="SQLite database path")
+    p.add_argument("--reference", default=REFERENCE_GENOME)
     p.add_argument("--sequencing", default="single")
     p.add_argument("--star-log",  default=None, help="path to STAR Log.final.out")
     p.add_argument("--cell-line",  default=None,
@@ -109,17 +112,33 @@ def get_version(cmd):
         return "unknown"
 
 
+def pipeline_version():
+    """git describe of this checkout, or $SCRNA_PIPELINE_VERSION (set in the container)."""
+    if os.environ.get("SCRNA_PIPELINE_VERSION"):
+        return os.environ["SCRNA_PIPELINE_VERSION"]
+    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    try:
+        return subprocess.run(
+            ["git", "-C", repo, "describe", "--always", "--dirty", "--tags"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+    except Exception:
+        return "unknown"
+
+
 # ─────────────────────────────────────────────
 # SQLite setup
 # ─────────────────────────────────────────────
+def _add_missing_columns(conn, table, columns):
+    existing = {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    for name, sql_type in columns:
+        if name not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {sql_type}")
+
+
 def init_sqlite(db_path):
-    """Create tables if they don't exist."""
+    """Create tables if they don't exist and migrate older schemas."""
     conn = sqlite3.connect(db_path)
-    # Migrate: add cell_line column if this is an older DB that lacks it
-    existing_cols = {r[1] for r in conn.execute("PRAGMA table_info(samples)").fetchall()}
-    if "cell_line" not in existing_cols:
-        conn.execute("ALTER TABLE samples ADD COLUMN cell_line TEXT")
-        conn.commit()
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS samples (
             sample_id    INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -136,7 +155,9 @@ def init_sqlite(db_path):
             run_date     TEXT,
             mapping_rate REAL,
             total_raw    INTEGER,
-            total_filt   INTEGER
+            total_filt   INTEGER,
+            added_by     TEXT,
+            pipeline_version TEXT
         );
 
         CREATE TABLE IF NOT EXISTS variants (
@@ -167,6 +188,8 @@ def init_sqlite(db_path):
         CREATE INDEX IF NOT EXISTS idx_calls_run
             ON genotype_calls(run_id);
     """)
+    _add_missing_columns(conn, "samples", [("cell_line", "TEXT")])
+    _add_missing_columns(conn, "runs", [("added_by", "TEXT"), ("pipeline_version", "TEXT")])
     conn.commit()
     return conn
 
@@ -340,52 +363,55 @@ def main():
 
     # 4. Load into SQLite
     print(f"  Loading genotypes into SQLite ({args.db})...")
-    conn = init_sqlite(args.db)
+    with write_lock(args.db):
+        conn = init_sqlite(args.db)
 
-    # Duplicate run_id check — fail loudly unless --force was given
-    existing_run = conn.execute(
-        "SELECT run_id FROM runs WHERE run_id=?", (args.run_id,)
-    ).fetchone()
-    if existing_run:
-        if not args.force:
-            conn.close()
-            raise SystemExit(
-                f"\nERROR: run_id '{args.run_id}' already exists in the database.\n"
-                f"  Each run_id must be unique. Choose a different run_id, or\n"
-                f"  pass --force to overwrite the existing data for this run.\n"
+        # Duplicate run_id check — fail loudly unless --force was given
+        existing_run = conn.execute(
+            "SELECT run_id FROM runs WHERE run_id=?", (args.run_id,)
+        ).fetchone()
+        if existing_run:
+            if not args.force:
+                conn.close()
+                raise SystemExit(
+                    f"\nERROR: run_id '{args.run_id}' already exists in the database.\n"
+                    f"  Each run_id must be unique. Choose a different run_id, or\n"
+                    f"  pass --force to overwrite the existing data for this run.\n"
+                )
+            print(f"  --force: removing existing data for run '{args.run_id}'")
+            conn.execute("DELETE FROM genotype_calls WHERE run_id=?", (args.run_id,))
+            conn.execute("DELETE FROM runs WHERE run_id=?", (args.run_id,))
+            conn.commit()
+
+        # Insert sample if not exists
+        conn.execute(
+            "INSERT OR IGNORE INTO samples (name, date_added) VALUES (?, ?)",
+            (args.sample, str(date.today()))
+        )
+        sample_id = conn.execute(
+            "SELECT sample_id FROM samples WHERE name=?", (args.sample,)
+        ).fetchone()[0]
+        # Set cell_line if provided (stored separately, does not replace name)
+        if args.cell_line:
+            conn.execute(
+                "UPDATE samples SET cell_line=? WHERE sample_id=?",
+                (args.cell_line, sample_id)
             )
-        print(f"  --force: removing existing data for run '{args.run_id}'")
-        conn.execute("DELETE FROM genotype_calls WHERE run_id=?", (args.run_id,))
-        conn.execute("DELETE FROM runs WHERE run_id=?", (args.run_id,))
+
+        conn.execute("""
+            INSERT INTO runs
+                (run_id, sample_id, reference, sequencing,
+                 run_date, mapping_rate, total_raw, total_filt,
+                 added_by, pipeline_version)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (args.run_id, sample_id, args.reference, args.sequencing,
+              str(date.today()), mapping_rate, raw_variants, filt_variants,
+              getpass.getuser(), pipeline_version()))
         conn.commit()
 
-    # Insert sample if not exists
-    conn.execute(
-        "INSERT OR IGNORE INTO samples (name, date_added) VALUES (?, ?)",
-        (args.sample, str(date.today()))
-    )
-    sample_id = conn.execute(
-        "SELECT sample_id FROM samples WHERE name=?", (args.sample,)
-    ).fetchone()[0]
-    # Set cell_line if provided (stored separately, does not replace name)
-    if args.cell_line:
-        conn.execute(
-            "UPDATE samples SET cell_line=? WHERE sample_id=?",
-            (args.cell_line, sample_id)
-        )
-
-    conn.execute("""
-        INSERT INTO runs
-            (run_id, sample_id, reference, sequencing,
-             run_date, mapping_rate, total_raw, total_filt)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    """, (args.run_id, sample_id, args.reference, args.sequencing,
-          str(date.today()), mapping_rate, raw_variants, filt_variants))
-    conn.commit()
-
-    rows = load_variants_sqlite(conn, args.vcf, args.run_id)
-    print(f"  ✓ {rows:,} variant calls loaded into SQLite")
-    conn.close()
+        rows = load_variants_sqlite(conn, args.vcf, args.run_id)
+        print(f"  ✓ {rows:,} variant calls loaded into SQLite")
+        conn.close()
 
     # 5. Parse STAR log for additional QC metrics
     print("  Parsing STAR log...")
@@ -400,13 +426,16 @@ def main():
     conn.close()
     print(f"  Mean depth: {mean_depth}x")
 
-    # 7. Push to Grist
-    print("  Pushing to Grist...")
-    push_to_grist(
-        args, total_reads, mapped_reads, mapping_rate,
-        raw_variants, filt_variants, star_ver, bcftools_ver,
-        pct_too_short, mean_depth, annotated_splice_pct,
-    )
+    # 7. Push to Grist (optional — only for users with Grist credentials in .env)
+    if all(os.environ.get(k) for k in ("GRIST_DOC_ID", "GRIST_SERVER", "GRIST_API_KEY")):
+        print("  Pushing to Grist...")
+        push_to_grist(
+            args, total_reads, mapped_reads, mapping_rate,
+            raw_variants, filt_variants, star_ver, bcftools_ver,
+            pct_too_short, mean_depth, annotated_splice_pct,
+        )
+    else:
+        print("  Grist credentials not set — skipping Grist push.")
 
     print(f"\nDone. Run {args.run_id} loaded successfully.\n")
 

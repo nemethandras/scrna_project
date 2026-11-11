@@ -7,12 +7,17 @@ import os
 import subprocess
 import sys
 
-# Default paths to reference data bundled with the workflow
-DEFAULT_REFERENCE  = "data/reference/genome.fa"
-DEFAULT_GTF        = "data/reference/genes.gtf"
-DEFAULT_STAR_INDEX = "data/reference/star_index_hg38_oh99"
-DEFAULT_SNPS_VCF   = "data/reference/genome1K.hg38.common_snps.vcf.gz"
-DEFAULT_DB         = "results/variants.db"
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"))
+from shared_paths import (  # noqa: E402
+    ANNOTATION_GTF as DEFAULT_GTF,
+    BWA_INDEX as DEFAULT_BWA_INDEX,
+    DEFAULT_DB,
+    REFERENCE_GENOME as DEFAULT_REFERENCE,
+    SNPS_SOURCE as DEFAULT_SNPS_SOURCE,
+    SNPS_VCF as DEFAULT_SNPS_VCF,
+    STAR_INDEX as DEFAULT_STAR_INDEX,
+)
+
 DEFAULT_CELL_LINE_MAP = "data/cell_line_map.csv"
 
 
@@ -54,11 +59,12 @@ def build_snakemake_cmd(run_id, sample, args, fastq_dir=None):
         f"sjdb_overhang={args.sjdb_overhang}",
         f"genome_sa_index_nbases={args.genome_sa_index_nbases}",
         f"bwa_index_dir={args.bwa_index}",
+        f"common_snps_vcf={args.snps_vcf}",
+        f"common_snps_source={DEFAULT_SNPS_SOURCE}",
+        f"db_path={args.db}",
     ]
     if cell_line:
         config_overrides.append(f"cell_line={cell_line}")
-    if args.db:
-        config_overrides.append(f"db_path={args.db}")
     if args.no_db:
         config_overrides.append("no_db=True")
     if getattr(args, "keep_intermediates", False):
@@ -68,6 +74,9 @@ def build_snakemake_cmd(run_id, sample, args, fastq_dir=None):
         "snakemake",
         "--snakefile", "workflow/Snakefile",
         "--cores", str(args.cores),
+        # Rerun only when inputs are newer, never because the Snakefile changed —
+        # otherwise Snakemake tries to rebuild the read-only shared indexes.
+        "--rerun-triggers", "mtime",
         "--config", *config_overrides,
     ]
     if args.dry_run:
@@ -174,7 +183,7 @@ def run_scrna(args):
     demux_run_id = args.demux_run_id
     cellsnp_dir  = args.cellsnp_dir or f"results/demux/{demux_run_id}/cellsnp"
     output       = f"results/demux/{demux_run_id}/assignments.tsv"
-    db           = args.db or DEFAULT_DB
+    db           = args.db
     log_path     = f"logs/demux/{demux_run_id}.log"
 
     os.makedirs(f"results/demux/{demux_run_id}", exist_ok=True)
@@ -451,8 +460,8 @@ examples:
              f"(default: {DEFAULT_CELL_LINE_MAP} if it exists)",
     )
     bulk.add_argument(
-        "--bwa-index", metavar="PATH", default="data/reference/bwa_index_hg38",
-        help="BWA index directory (wes mode only; default: data/reference/bwa_index_hg38)",
+        "--bwa-index", metavar="PATH", default=DEFAULT_BWA_INDEX,
+        help=f"BWA index directory (wes mode only; default: {DEFAULT_BWA_INDEX})",
     )
 
     # ── scRNA args ─────────────────────────────────────────────────────────
@@ -559,14 +568,14 @@ examples:
         help="send an email when the batch finishes or fails (bulk mode only)",
     )
     parser.add_argument(
-        "--db", metavar="PATH", default=None,
-        help=f"SQLite database file (default: {DEFAULT_DB})",
+        "--db", metavar="PATH", default=DEFAULT_DB,
+        help=f"SQLite database file (default: {DEFAULT_DB}; override with $SCRNA_DB)",
     )
 
     # ── Reference overrides (bulk) ─────────────────────────────────────────
     ref = parser.add_argument_group(
         "reference overrides (bulk mode)",
-        "optional — defaults to the hg38 reference bundled in data/reference/",
+        "optional — defaults to the shared hg38 reference ($SCRNA_SHARED_ROOT/reference/hg38)",
     )
     ref.add_argument(
         "--reference", metavar="PATH", default=DEFAULT_REFERENCE,

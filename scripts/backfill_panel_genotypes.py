@@ -26,6 +26,8 @@ import sys
 from pathlib import Path
 
 from cyvcf2 import VCF
+from db_lock import write_lock
+from shared_paths import DEFAULT_DB, SNPS_VCF
 
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
@@ -34,8 +36,8 @@ def parse_args():
     p = argparse.ArgumentParser(
         description="Backfill 0/0 panel genotypes for runs missing ref calls"
     )
-    p.add_argument("--db",        default="results/variants.db")
-    p.add_argument("--panel",     default="data/reference/genome1K.hg38.common_snps.vcf.gz",
+    p.add_argument("--db",        default=DEFAULT_DB)
+    p.add_argument("--panel",     default=SNPS_VCF,
                    help="common SNP panel VCF (must be tabix-indexed)")
     p.add_argument("--results",   default="results",
                    help="results root directory")
@@ -210,7 +212,8 @@ def main():
 
         # Step 3: reload genotype calls in SQLite
         print(f"  Step 3: reloading {run_id} in {args.db}...")
-        n = load_variants_sqlite(conn, filt_vcf, run_id)
+        with write_lock(args.db):
+            n = load_variants_sqlite(conn, filt_vcf, run_id)
         n_ref = conn.execute(
             "SELECT COUNT(*) FROM genotype_calls WHERE run_id=? AND genotype='0/0'",
             (run_id,)

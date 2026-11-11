@@ -38,17 +38,20 @@ mode: sc
 # ─────────────────────────────────────────────
 # Reference data
 # ─────────────────────────────────────────────
-reference_genome: data/reference/genome.fa
-annotation_gtf:   data/reference/genes.gtf    # sc mode only
-star_index_dir:   data/reference/star_index_hg38_oh99/  # sc mode only
-bwa_index_dir:    data/reference/bwa_index_hg38/        # wes mode only
+# Lab-wide shared, read-only copies (see scripts/setup_shared.sh).
+# run_pipeline.py takes these from scripts/shared_paths.py instead, which
+# honours $SCRNA_SHARED_ROOT; edit here only when calling snakemake directly.
+reference_genome: /groups/nils/data/scrna_pipeline/reference/hg38/genome.fa
+annotation_gtf:   /groups/nils/data/scrna_pipeline/reference/hg38/genes.gtf                # sc mode only
+star_index_dir:   /groups/nils/data/scrna_pipeline/reference/hg38/star_index_hg38_oh99    # sc mode only
+bwa_index_dir:    /groups/nils/data/scrna_pipeline/reference/hg38/bwa_index_hg38          # wes mode only
 
 # 1000 Genomes common SNP panel (AF > 5%, hg38).
 # common_snps_source: raw VCF with bare chrom names (1, 2, … X).
 # common_snps_vcf:    chr-prefixed, bgzipped, tabix-indexed version
 #                     generated once by the normalize_snp_panel rule.
-common_snps_source: validation/genome1K.phase3.SNP_AF5e2.chr1toX.hg38.vcf
-common_snps_vcf:    data/reference/genome1K.hg38.common_snps.vcf.gz
+common_snps_source: /groups/nils/data/scrna_pipeline/reference/hg38/genome1K.phase3.SNP_AF5e2.chr1toX.hg38.vcf
+common_snps_vcf:    /groups/nils/data/scrna_pipeline/reference/hg38/genome1K.hg38.common_snps.vcf.gz
 
 # ─────────────────────────────────────────────
 # Alignment parameters (mode-dependent)
@@ -108,9 +111,9 @@ keep_intermediates: false
 # ─────────────────────────────────────────────
 # Database
 # ─────────────────────────────────────────────
-# SQLite database file that accumulates variant calls across all runs.
-# Override with --db on the command line.
-db_path: results/variants.db
+# Shared SQLite database that accumulates variant calls from every user.
+# Writers serialise on <db_path>.lock. Override with --db on the command line.
+db_path: /groups/nils/data/scrna_pipeline/db/variants.db
 
 # ─────────────────────────────────────────────
 # Demultiplexing (CellRanger → cell line assignment)

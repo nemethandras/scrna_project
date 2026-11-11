@@ -34,6 +34,7 @@ import sys
 from pathlib import Path
 
 from cyvcf2 import VCF
+from db_lock import write_lock
 
 
 def parse_args():
@@ -188,14 +189,15 @@ def main():
         print("Nothing left to insert.")
         return
 
-    conn = sqlite3.connect(args.db)
-    try:
-        for donor in unmatched:
-            sample_name, run_id, n = insert_donor(conn, args.demux_run_id, donor, records)
-            print(f"  {donor:<12} → {sample_name}  ({n:,} ALT calls, run_id={run_id})")
-        conn.commit()
-    finally:
-        conn.close()
+    with write_lock(args.db):
+        conn = sqlite3.connect(args.db)
+        try:
+            for donor in unmatched:
+                sample_name, run_id, n = insert_donor(conn, args.demux_run_id, donor, records)
+                print(f"  {donor:<12} → {sample_name}  ({n:,} ALT calls, run_id={run_id})")
+            conn.commit()
+        finally:
+            conn.close()
 
     print(f"\nDone. To label the new entries once identified:")
     print(f"  UPDATE samples SET cell_line='<NAME>'")

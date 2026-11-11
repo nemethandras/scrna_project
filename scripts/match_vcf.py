@@ -14,12 +14,13 @@ Usage:
 import argparse
 import sqlite3
 from cyvcf2 import VCF
+from shared_paths import DEFAULT_DB
 
 
 def parse_args():
     p = argparse.ArgumentParser(description="Match unknown VCF against database samples")
     p.add_argument("--vcf",       required=True, help="path to the unknown VCF file")
-    p.add_argument("--db",        default="results/variants.db", help="SQLite database path")
+    p.add_argument("--db",        default=DEFAULT_DB, help="SQLite database path")
     p.add_argument("--min-match", type=float, default=40.0,
                    help="minimum match %% to report (default: 40)")
     p.add_argument("--metric",    choices=["overlap", "jaccard"], default="overlap",

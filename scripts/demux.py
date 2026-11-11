@@ -28,6 +28,7 @@ from collections import Counter
 from pathlib import Path
 from scipy.special import gammaln
 from cyvcf2 import VCF
+from db_lock import write_lock
 
 
 # Sequencing error rate — prevents log(0) and models base-call errors.
@@ -441,7 +442,8 @@ def main():
 
     if args.load_db:
         print(f"Loading assignments into DB ({args.db})...")
-        load_assignments_to_db(results, barcodes, args.db, args.demux_run_id)
+        with write_lock(args.db):
+            load_assignments_to_db(results, barcodes, args.db, args.demux_run_id)
 
     print("\nDone.\n")
 
