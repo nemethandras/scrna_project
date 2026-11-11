@@ -124,12 +124,13 @@ rule all:
 # normalize_snp_panel — run once to produce the
 # chr-prefixed, bgzipped, tabix-indexed common
 # SNP panel used as target positions for pileup.
-# Re-runs only if the source VCF changes.
+# Runs only if the panel is missing: ancient() ignores input timestamps,
+# which a git clone/pull resets, so shared references are never rebuilt.
 # ─────────────────────────────────────────────
 rule normalize_snp_panel:
     input:
-        vcf      = config["common_snps_source"],
-        conv     = os.path.join(workflow.basedir, "chr_name_conv.txt")
+        vcf      = ancient(config["common_snps_source"]),
+        conv     = ancient(os.path.join(workflow.basedir, "chr_name_conv.txt"))
     output:
         vcf      = config["common_snps_vcf"],
         tbi      = config["common_snps_vcf"] + ".tbi"
@@ -165,12 +166,12 @@ rule fastqc:
 
 
 # ─────────────────────────────────────────────
-# STAR index — run once, not per sample
+# STAR index — run once (only if missing), not per sample
 # ─────────────────────────────────────────────
 rule star_index:
     input:
-        fasta = config["reference_genome"],
-        gtf   = config["annotation_gtf"]
+        fasta = ancient(config["reference_genome"]),
+        gtf   = ancient(config["annotation_gtf"])
     output:
         directory(config["star_index_dir"])
     threads:
@@ -228,7 +229,7 @@ rule star_align:
 if MODE == "wes":
     rule bwa_index:
         input:
-            config["reference_genome"]
+            ancient(config["reference_genome"])
         output:
             directory(config["bwa_index_dir"])
         log:
