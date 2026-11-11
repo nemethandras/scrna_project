@@ -8,6 +8,10 @@ data/
 # reproducible from the inputs — no need to track it.
 results/
 logs/
+nohup.out
+
+# ── Personal presentation figures ─────────────────────────────────────────────
+figures/
 
 # ── Snakemake internals ────────────────────────────────────────────────────────
 .snakemake/
@@ -23,3 +27,4 @@ validation/
 
 # ── OS / editor noise ─────────────────────────────────────────────────────────
 .DS_Store
+.ipynb_checkpoints/
