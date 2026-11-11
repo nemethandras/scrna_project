@@ -176,23 +176,13 @@ def query_db_genotypes(db_path, run_ids, positions, min_depth=10):
 # ─────────────────────────────────────────────
 # Scoring
 # ─────────────────────────────────────────────
-def _binom_logpmf(k, n, p):
-    """Binomial log PMF, vectorised. Safe against p=0 or p=1."""
-    p = np.clip(p, 1e-6, 1.0 - 1e-6)
-    return (
-        gammaln(n + 1) - gammaln(k + 1) - gammaln(n - k + 1)
-        + k * np.log(p)
-        + (n - k) * np.log(1.0 - p)
-    )
-
-
 def score_cells(ad, dp, dosage, min_depth):
     """
     Compute per-(cell, donor) log-likelihood scores.
 
-    Iterates over donors (not cells) so the sparse column structure of
-    the CSC matrices is exploited efficiently without loading everything
-    into a dense array.
+    Works on the non-zero (position, cell) entries only: an entry with zero
+    depth contributes nothing to the likelihood, so the dense cell × position
+    matrix (tens of GB for a 10k-cell pool) is never built.
 
     Returns
     -------
@@ -201,6 +191,26 @@ def score_cells(ad, dp, dosage, min_depth):
     """
     n_pos, n_cells = ad.shape
     n_donors = dosage.shape[1]
+
+    dp_coo = dp.tocoo()
+    keep = dp_coo.data >= max(min_depth, 1)
+    rows = dp_coo.row[keep]
+    cols = dp_coo.col[keep]
+    n = dp_coo.data[keep].astype(np.float64)
+
+    # Alt counts aligned to the depth entries (AD is non-zero only where DP is)
+    ad_coo = ad.tocoo()
+    ad_key = ad_coo.row.astype(np.int64) * n_cells + ad_coo.col
+    order = np.argsort(ad_key)
+    ad_key, ad_val = ad_key[order], ad_coo.data[order]
+    dp_key = rows.astype(np.int64) * n_cells + cols
+    hit = np.searchsorted(ad_key, dp_key)
+    hit_ok = hit < len(ad_key)
+    hit_ok[hit_ok] = ad_key[hit[hit_ok]] == dp_key[hit_ok]
+    k = np.zeros_like(n)
+    k[hit_ok] = ad_val[hit[hit_ok]]
+
+    log_binom_coef = gammaln(n + 1) - gammaln(k + 1) - gammaln(n - k + 1)
 
     scores = np.full((n_cells, n_donors), np.nan)
     n_used = np.zeros((n_cells, n_donors), dtype=np.int32)
@@ -211,25 +221,14 @@ def score_cells(ad, dp, dosage, min_depth):
         if not has_gt.any():
             continue
 
-        p_sub = p_all[has_gt]          # positions this donor has calls at
-        pos_idx = np.where(has_gt)[0]
+        sel = has_gt[rows]
+        p = np.clip(p_all[rows[sel]], 1e-6, 1.0 - 1e-6)
+        ll = log_binom_coef[sel] + k[sel] * np.log(p) + (n[sel] - k[sel]) * np.log(1.0 - p)
 
-        # Slice the sparse matrices to only the rows with GT for this donor,
-        # then convert to dense — much smaller than the full matrix.
-        ad_sub = np.asarray(ad[pos_idx, :].todense())   # (n_gt_pos, n_cells)
-        dp_sub = np.asarray(dp[pos_idx, :].todense())
-
-        depth_ok = dp_sub >= min_depth                   # (n_gt_pos, n_cells)
-
-        ll = _binom_logpmf(
-            ad_sub,
-            dp_sub,
-            p_sub[:, np.newaxis],      # broadcast p over cells
-        )
-        ll[~depth_ok] = 0.0            # exclude low-depth positions
-
-        scores[:, di] = ll.sum(axis=0)
-        n_used[:, di] = depth_ok.sum(axis=0)
+        scores[:, di] = np.bincount(cols[sel], weights=ll, minlength=n_cells)
+        n_used[:, di] = np.bincount(cols[sel], minlength=n_cells)
+        if min_depth <= 0:
+            n_used[:, di] = has_gt.sum()
 
     return scores, n_used
 

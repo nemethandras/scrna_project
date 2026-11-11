@@ -14,6 +14,8 @@ dependencies:
   - htslib=1.23.1
   # scRNA demultiplexing
   - cellsnp-lite=1.2.3
+  # sqlite3 command-line client for querying the database
+  - sqlite
   # Python libraries used by scripts/
   - numpy=2.4
   - scipy=1.17
