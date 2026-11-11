@@ -17,7 +17,7 @@ Quick summary of everything in the DB:
 ```bash
 python - <<'EOF'
 import sqlite3, pandas as pd
-conn = sqlite3.connect("results/variants.db")
+conn = sqlite3.connect("/groups/nils/data/scrna_pipeline/db/variants.db")
 
 print("=== Database summary ===")
 for tbl, n in conn.execute("""
@@ -45,7 +45,7 @@ Which cell lines have the most called ALT variants, and what is the typical dept
 ```bash
 python - <<'EOF'
 import sqlite3, pandas as pd
-conn = sqlite3.connect("results/variants.db")
+conn = sqlite3.connect("/groups/nils/data/scrna_pipeline/db/variants.db")
 df = pd.read_sql("""
     SELECT s.cell_line,
            COUNT(*)                    AS n_positions,
@@ -166,7 +166,7 @@ several donors cannot be confidently assigned.
 ```bash
 conda run -n scrna python scripts/match_vireo.py \
     --vireo-dir results/demux/pool_ctr_v4/vireo \
-    --db results/variants.db \
+    --db /groups/nils/data/scrna_pipeline/db/variants.db \
     --output /tmp/donor_matches_demo.tsv \
     --min-concordance 0.80 \
     --min-gap 0.10 \
@@ -203,7 +203,7 @@ donor6       SRR5071667_hg38  HCT116     0.869        40079        SRR5071691_hg
 jupyter lab notebooks/01_explore_fastq.ipynb
 ```
 
-The notebook connects to `results/variants.db` automatically. Sections to show:
+The notebook connects to `/groups/nils/data/scrna_pipeline/db/variants.db` automatically. Sections to show:
 
 - **Cross-sample QC overview** — mapping rates and variant counts, all 44 runs
 - **Variant overlap heatmap** — Jaccard / containment between cell lines + distribution curves

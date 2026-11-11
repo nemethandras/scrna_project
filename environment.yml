@@ -1,11 +1,33 @@
 name: scrna
 channels:
-  - bioconda
   - conda-forge
-  - defaults
+  - bioconda
 dependencies:
+  - python=3.13
+  # Alignment / variant calling
   - snakemake=9.17.3
   - star=2.7.10b
+  - bwa=0.7.19
   - fastqc=0.12.1
   - samtools=1.23.1
   - bcftools=1.23.1
+  - htslib=1.23.1
+  # scRNA demultiplexing
+  - cellsnp-lite=1.2.3
+  # Python libraries used by scripts/
+  - numpy=2.4
+  - scipy=1.17
+  - pandas=2.3
+  - requests
+  - pip
+  - pip:
+      - cyvcf2==0.32.1
+      - vireoSNP==0.5.9
+      - grist-api==0.1.1
+      - python-dotenv==1.2.2
+      # Notebooks
+      - jupyterlab==4.6.1
+      - ipykernel
+      - ipywidgets==8.1.8
+      - plotly==6.7.0
+      - kaleido==0.2.1

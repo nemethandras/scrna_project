@@ -120,22 +120,21 @@ All times are wall-clock, measured from snakemake logs on the same 16-core host
 ### Bulk RNA / scRNA reference run (STAR pipeline)
 Cores: 16 (STAR), 8 (samtools/bcftools)
 
+Measured from the 40 runs with a complete, error-free snakemake log.
+
 | Step               | Min  | Median | Max  |
 |--------------------|------|--------|------|
-| STAR align         | 1.8 min | 3.4 min | 21.5 min |
-| bcftools mpileup   | ~5 min | ~15 min | ~36 min |
-| **Total (per run)** | **10 min** | **16 min** | **102 min** |
+| STAR align         | 2.1 min | 3.4 min | 21.5 min |
+| bcftools mpileup   | 2.1 min | 5.5 min | 63.4 min |
+| **Total (per run)** | **6.4 min** | **13.8 min** | **92 min** |
 
-The 102-min outlier is the first run when STAR index had not been built yet
-(STAR genome index takes ~40 min; built once).
-Typical subsequent run: 10–50 min depending on dataset size.
+The 92-min maximum is the one run that also built the STAR genome index
+(~41 min, done once; the index is now shared). Excluding it, max = 86 min.
 
-**Exact command (single sample, index already built):**
+**Exact command (single sample):**
 ```bash
-snakemake results/{sample}_hg38/db/{sample}.loaded \
-    --configfile config/config.yaml \
-    --config sample={sample} \
-    --cores 16
+python run_pipeline.py --mode bulk --sample {sample} --run-id {sample}_hg38 \
+    --fastq-dir data/{sample} --dry-run      # drop --dry-run to execute
 ```
 
 ### WES (BWA + bcftools)
@@ -156,47 +155,36 @@ Cores: 16 (BWA), 8 (bcftools/samtools)
 
 **Exact command:**
 ```bash
-snakemake results/{sample}_wes_v1/db/{sample}.loaded \
-    --configfile config/config.yaml \
-    --config sample={sample} \
-    --cores 16
+python run_pipeline.py --mode wes --sequencing paired \
+    --sample {sample} --run-id {sample}_wes_v1 --dry-run
 ```
 
-### scRNA pool demultiplexing (pool_ctr_v4, 299 cells, 12 GB BAM)
-Cores: 8 (cellsnp-lite, Vireo)
+### scRNA pool demultiplexing (pool_ctr_v4, 10,308 cells, 12 GB BAM)
 
-| Step              | Wall-clock   |
-|-------------------|--------------|
-| cellsnp-lite      | ~1 h 20 min  |
-| Vireo (unguided)  | ~1 h 5 min   |
-| match_vireo.py    | < 1 min      |
-| **Total**         | **~2 h 30 min** |
+**cellsnp-lite has never been run by this pipeline.** Every pool run used a
+pre-computed pileup (`--cellsnp-dir data/Pool_ctr/cellsnp`, copied in on
+2026-05-27 together with the BAM), so there is no cellsnp-lite timing.
 
-For reference-guided Vireo (known cell lines), Vireo runtime is shorter.
+| Step              | Wall-clock   | Evidence |
+|-------------------|--------------|----------|
+| cellsnp-lite      | not measured | pileup was pre-computed |
+| Vireo (unguided)  | ~64 min      | assignments.tsv 15:32 → vireo/ 16:36 (2026-06-17) |
+| match_vireo.py    | ~30 s        | timed directly |
 
-**Exact command (unguided, using DB references):**
+**Exact command (unguided, from the existing pileup):**
 ```bash
-# 1. cellsnp pileup
-snakemake results/demux/{demux_run_id}/cellsnp \
-    --config demux.bam=data/Pool_ctr/possorted_genome_bam.bam \
-             demux.barcodes=data/Pool_ctr/barcodes.tsv.gz \
-             demux.demux_run_id={demux_run_id} \
-    --cores 8
-
-# 2. Vireo (unguided, 7 donors)
-snakemake results/demux/{demux_run_id}/vireo \
-    --config demux.n_donors=7 --cores 8
-
-# 3. match_vireo
-python scripts/match_vireo.py \
-    results/demux/{demux_run_id}/vireo \
-    results/variants.db \
-    --min-concordance 0.80 --min-gap 0.15 --min-positions 200 --unique \
-    --out results/demux/{demux_run_id}/donor_matches.tsv
+python run_pipeline.py --mode scrna --cellsnp-dir data/Pool_ctr/cellsnp \
+    --demux-run-id {demux_run_id} --n-donors 7 --unique --dry-run
 ```
-
-*Note:* `match_vireo.py` has no `--dry-run` mode.
-`match_vcf.py` similarly has no `--dry-run`.
+`--dry-run` prints the full shell script (demux → Vireo → match_vireo → merge)
+without running it. To run only the matching step:
+```bash
+python scripts/match_vireo.py --vireo-dir results/demux/pool_ctr_v4/vireo \
+    --db /groups/nils/data/scrna_pipeline/db/variants.db \
+    --min-concordance 0.80 --min-gap 0.15 --min-positions 200 --unique \
+    --output /tmp/donor_matches.tsv
+```
+`match_vireo.py` and `match_vcf.py` have no `--dry-run` mode.
 
 ---
 

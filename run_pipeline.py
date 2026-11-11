@@ -4,10 +4,17 @@
 import argparse
 import csv
 import os
+import shutil
 import subprocess
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"))
+# Code paths are resolved from this file; data/, results/ and logs/ are
+# relative to the working directory, so this can be run from any project folder.
+REPO_DIR    = os.path.dirname(os.path.abspath(__file__))
+SCRIPTS_DIR = os.path.join(REPO_DIR, "scripts")
+SNAKEFILE   = os.path.join(REPO_DIR, "workflow", "Snakefile")
+
+sys.path.insert(0, SCRIPTS_DIR)
 from shared_paths import (  # noqa: E402
     ANNOTATION_GTF as DEFAULT_GTF,
     BWA_INDEX as DEFAULT_BWA_INDEX,
@@ -72,7 +79,7 @@ def build_snakemake_cmd(run_id, sample, args, fastq_dir=None):
 
     cmd = [
         "snakemake",
-        "--snakefile", "workflow/Snakefile",
+        "--snakefile", SNAKEFILE,
         "--cores", str(args.cores),
         # Rerun only when inputs are newer, never because the Snakefile changed —
         # otherwise Snakemake tries to rebuild the read-only shared indexes.
@@ -162,6 +169,10 @@ def run_batch(samples, suffix, args):
 
     script = "\n".join(script_lines) + "\n"
 
+    if args.foreground:
+        print(f"Batch of {len(samples)} samples running in foreground; log: {log_path}")
+        sys.exit(subprocess.run(["bash", "-c", script]).returncode)
+
     with open(log_path, "w") as log_file:
         proc = subprocess.Popen(
             ["bash", "-c", script],
@@ -236,7 +247,7 @@ def run_scrna(args):
     script_lines += [
         f'echo "--- demux (binomial scorer) ---"',
         (
-            f'python scripts/demux.py'
+            f'python {SCRIPTS_DIR}/demux.py'
             f' --cellsnp-dir {cellsnp_dir}'
             f' --db {db}'
             f' --run-ids {run_ids_str}'
@@ -256,7 +267,7 @@ def run_scrna(args):
         script_lines += [
             f'echo "--- building donor reference VCF from DB ---"',
             (
-                f'python scripts/make_donor_vcf.py'
+                f'python {SCRIPTS_DIR}/make_donor_vcf.py'
                 f' --cell-lines {known_str}'
                 f' --db {db}'
                 f' --output {donor_ref_vcf}'
@@ -281,7 +292,7 @@ def run_scrna(args):
         script_lines += [
             f'echo "--- building donor reference VCF (DB + extra VCF) ---"',
             (
-                f'python scripts/make_donor_vcf.py'
+                f'python {SCRIPTS_DIR}/make_donor_vcf.py'
                 f' --cell-lines {known_str}'
                 f' --extra-vcf {args.donor_vcf}'
                 f' --db {db}'
@@ -304,7 +315,7 @@ def run_scrna(args):
         script_lines += [
             f'echo "--- merging results (reference-guided) ---"',
             (
-                f'python scripts/merge_demux.py'
+                f'python {SCRIPTS_DIR}/merge_demux.py'
                 f' --vireo-dir {vireo_dir}'
                 f' --scorer {output}'
                 f' --output {final_out}'
@@ -315,7 +326,7 @@ def run_scrna(args):
         script_lines += [
             f'echo "--- matching Vireo donors to DB ---"',
             (
-                f'python scripts/match_vireo.py'
+                f'python {SCRIPTS_DIR}/match_vireo.py'
                 f' --vireo-dir {vireo_dir}'
                 f' --db {db}'
                 f' --run-ids {run_ids_str}'
@@ -326,7 +337,7 @@ def run_scrna(args):
             ),
             f'echo "--- merging results ---"',
             (
-                f'python scripts/merge_demux.py'
+                f'python {SCRIPTS_DIR}/merge_demux.py'
                 f' --vireo-dir {vireo_dir}'
                 f' --matches {donor_matches}'
                 f' --scorer {output}'
@@ -339,7 +350,7 @@ def run_scrna(args):
         script_lines += [
             f'echo "--- adding unmatched donors to DB ---"',
             (
-                f'python scripts/add_unmatched_donors.py'
+                f'python {SCRIPTS_DIR}/add_unmatched_donors.py'
                 f' --vireo-dir {vireo_dir}'
                 f' --matches {donor_matches}'
                 f' --db {db}'
@@ -618,6 +629,20 @@ examples:
             parser.error("--mode scrna requires either --bam (+ --barcodes) or --cellsnp-dir")
         if args.bam and not args.barcodes:
             parser.error("--barcodes is required when --bam is provided")
+
+    # ── Tools ──────────────────────────────────────────────────────────────
+    # Make tools from this interpreter's env visible even if it isn't activated.
+    os.environ["PATH"] = os.path.dirname(sys.executable) + os.pathsep + os.environ.get("PATH", "")
+    if args.mode == "scrna":
+        tools = ["vireo"] + (["cellsnp-lite"] if args.bam else [])
+    else:
+        tools = ["snakemake", "samtools", "bcftools", "fastqc",
+                 "bwa" if args.mode == "wes" else "STAR"]
+    missing = [t for t in tools if not shutil.which(t)]
+    if missing and not (args.mode == "scrna" and args.dry_run):
+        parser.error(f"not found on PATH: {', '.join(missing)}\n"
+                     f"  Activate the pipeline environment first (conda activate scrna) "
+                     f"or use the container.")
 
     # ── Dispatch ───────────────────────────────────────────────────────────
     if args.mode in ("bulk", "wes"):

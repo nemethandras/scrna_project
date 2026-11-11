@@ -1,0 +1,13 @@
+.git
+data/
+results/
+logs/
+figures/
+validation/
+notebooks/
+.snakemake/
+**/__pycache__/
+*.db
+.env
+nohup.out
+presentation_numbers_v6.md

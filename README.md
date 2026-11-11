@@ -122,7 +122,8 @@ combines Vireo identity, DB concordance, and binomial scorer output.
 
 The pipeline writes to two separate databases:
 
-- **SQLite** (`results/variants.db`) — lives on the server. Stores the full
+- **SQLite** (`/groups/nils/data/scrna_pipeline/db/variants.db`) — one shared
+  file on the server that every user's runs are added to. Stores the full
   genotype data for programmatic queries and demultiplexing.
 - **Grist** — the web-based spreadsheet. Stores run summaries and QC metrics
   for human review.
@@ -249,6 +250,9 @@ All managed via conda — see Setup below.
 
 ```
 scrna_project/
+├── run_pipeline.py              # command-line entry point (call from any project folder)
+├── environment.yml              # conda environment with every tool and library
+├── Dockerfile                   # container image built from environment.yml
 ├── config/
 │   └── config.yaml              # all run parameters — edit before each run
 ├── workflow/
@@ -264,10 +268,15 @@ scrna_project/
 │   ├── add_unmatched_donors.py      # insert unmatched Vireo donors as new DB references
 │   ├── validate_vcf.py              # hg38/hg19 detection for external VCFs
 │   ├── match_vcf.py                 # match an unknown VCF against the database
+│   ├── shared_paths.py              # default locations of shared reference + DB
+│   ├── db_lock.py                   # write lock for the shared DB
+│   ├── backup_db.py                 # snapshot the shared DB (cron)
+│   ├── setup_shared.sh              # create a shared reference + DB directory
 │   └── test_grist.py                # inspect Grist table schema
+│
+│   — in your project folder (not in the repo) —
 ├── data/
 │   ├── cell_line_map.csv        # Run (SRR accession) → cell_line mapping for auto-labelling
-│   ├── reference/               # genome FASTA, GTF, STAR index, and SNP panel
 │   └── <sample>/                # one folder per sample: <sample>_1.fastq [_2.fastq]
 ├── results/
 │   ├── <run_id>/                # all outputs isolated per run
@@ -279,7 +288,6 @@ scrna_project/
 │   ├── demux/<demux_run_id>/    # demultiplexing outputs
 │   │   ├── cellsnp/             # cellSNP-lite per-cell pileup
 │   │   └── assignments.tsv      # cell barcode → cell line assignments
-│   └── variants.db              # SQLite database accumulating all runs
 ├── validation/
 │   └── donor_ids.tsv            # reference-guided Vireo output for Pool_ctr (ground-truth composition)
 ├── logs/
@@ -290,18 +298,93 @@ scrna_project/
 
 ## Setup
 
-### 1. Conda environment
+The pipeline code, the reference data and the genotype database live in three
+separate places:
+
+| What | Where | Who writes it |
+|---|---|---|
+| Pipeline code | this repository (clone it anywhere) | developers |
+| Reference data (genome, GTF, SNP panel, STAR + BWA indexes, ~30 GB) | `/groups/nils/data/scrna_pipeline/reference/hg38/` | nobody — read-only |
+| Genotype database | `/groups/nils/data/scrna_pipeline/db/variants.db` | every run that loads results |
+| Your FASTQs, results and logs | your own project folder (`data/`, `results/`, `logs/`) | you |
+
+`run_pipeline.py` can be called from any project folder; code paths are
+resolved from the repository, data paths from the folder you are in.
+
+### Option A — on the lab server (recommended)
 
 ```bash
-conda env create -f environment.yml
+git clone https://github.com/nemethandras/scrna_project.git ~/scrna_project
+conda env create -f ~/scrna_project/environment.yml     # once, ~10 min
 conda activate scrna
+
+mkdir -p ~/my_project/data && cd ~/my_project
+# put FASTQs in data/<sample>/  (see "Preparing input data")
+python ~/scrna_project/run_pipeline.py --mode bulk \
+    --sample SRR5071686 --run-id SRR5071686_hg38 --dry-run
 ```
 
-Activate at the start of every session before running the pipeline.
+Nothing else to set up: the reference data and the database are found
+automatically. If the tools are not on your PATH, `run_pipeline.py` stops and
+tells you to activate the environment.
 
-### 2. API credentials
+### Option B — container (other machines)
 
-Copy `.env.example` to `.env` and fill in your values:
+The `Dockerfile` packages every tool from `environment.yml` plus the pipeline
+code. Reference data and the database are not in the image; mount them at
+`/shared`:
+
+```bash
+docker build --build-arg PIPELINE_VERSION=$(git describe --always --dirty) -t scrna-pipeline .
+
+cd ~/my_project
+docker run --rm --user $(id -u):$(id -g) \
+    -v /groups/nils/data/scrna_pipeline:/shared \
+    -v "$PWD":/work \
+    scrna-pipeline --mode bulk --sample SRR5071686 --run-id SRR5071686_hg38
+```
+
+Everything after the image name is passed to `run_pipeline.py`; runs always
+stay in the foreground (use `docker run -d` to detach). On clusters without
+Docker, Apptainer can run the same image:
+`apptainer build scrna.sif docker-daemon://scrna-pipeline:latest`.
+
+> Building needs Docker access (membership of the `docker` group), which is
+> not granted by default on the lab server.
+
+### Option C — outside the lab
+
+Create your own shared directory, then point the pipeline at it:
+
+```bash
+export SCRNA_SHARED_ROOT=/path/to/scrna_pipeline
+bash scripts/setup_shared.sh <reference_dir> <genome1K_vcf> <existing_or_empty_db>
+```
+
+`SCRNA_SHARED_ROOT` moves both the reference data and the database;
+`SCRNA_DB` moves only the database. `--db` and the reference flags
+(`--reference`, `--star-index`, …) override individual paths for one run.
+
+### The shared database
+
+- **Concurrent writes.** SQLite's own locking is unreliable on network
+  filesystems such as `/groups`, so every script that writes to the database
+  first takes a lock on `variants.db.lock`. A second writer waits and prints who
+  holds the lock. Readers (notebooks, `match_vireo.py`, `match_vcf.py`) are not
+  blocked.
+- **Provenance.** Each row in `runs` records `added_by` (Unix user) and
+  `pipeline_version` (`git describe` of the code that produced it).
+- **Backups.** `python scripts/backup_db.py` writes a consistent snapshot to
+  `db/backups/` and keeps the last 14. Run it nightly from cron:
+  `0 3 * * *  cd ~/scrna_project && <env>/bin/python scripts/backup_db.py`
+- **Permissions.** The `db/` directory is writable by the `nils` group; the
+  reference directory is read-only so no run can rebuild or overwrite a shared
+  index.
+
+### Grist credentials (optional)
+
+Run summaries are additionally pushed to Grist when credentials are present;
+without them this step is skipped. Copy `.env.example` to `.env` and fill in your values:
 
 ```bash
 cp .env.example .env
@@ -320,25 +403,16 @@ Source the file before running the pipeline:
 source .env
 ```
 
-The `.env` file is in `.gitignore` and will never be committed. The SQLite
-database (`results/variants.db`) is also ignored.
+The `.env` file is in `.gitignore` and will never be committed.
 
-### 3. One-time SNP panel setup
+### SNP panel
 
 The pipeline restricts variant calling to ~7M common SNP positions from the
-1000 Genomes Project (AF > 5%, hg38). The raw VCF uses bare chromosome names
-(`1`, `2`, `X`) which need to be converted to match the pipeline reference
-(`chr1`, `chr2`, `chrX`). This is done once:
-
-```bash
-# Set common_snps_source in config.yaml to the path of the genome1K VCF,
-# then run just the normalization rule:
-snakemake data/reference/genome1K.hg38.common_snps.vcf.gz
-```
-
-This produces a bgzipped, tabix-indexed VCF at `data/reference/genome1K.hg38.common_snps.vcf.gz`.
-Subsequent pipeline runs use this file directly — the rule only re-runs if the
-source VCF changes.
+1000 Genomes Project (AF > 5%, hg38). The shared reference directory already
+contains the chr-prefixed, bgzipped and indexed panel
+(`genome1K.hg38.common_snps.vcf.gz`). Only when building a new reference
+directory does it need to be generated from the raw VCF, by the
+`normalize_snp_panel` rule.
 
 ## Running the pipeline
 
@@ -380,7 +454,7 @@ source .env && python run_pipeline.py --mode bulk --run-id MY_RUN --sample MY_SA
 ```
 --sequencing        paired or single (default: single)
 --cores             number of CPU cores (default: 16)
---db PATH           SQLite database file (default: results/variants.db)
+--db PATH           SQLite database file (default: the shared DB; $SCRNA_DB)
 --notify-email ADDR send an email when the batch finishes or fails (requires server mail)
 --no-db             skip database loading entirely (useful for test/holdout samples)
 --force             re-run all steps even if outputs already exist
@@ -389,7 +463,7 @@ source .env && python run_pipeline.py --mode bulk --run-id MY_RUN --sample MY_SA
 -n/--dry-run        show what would run without executing anything
 ```
 
-**Reference overrides** (optional — defaults to the hg38 reference in `data/reference/`):
+**Reference overrides** (optional — defaults to the shared hg38 reference in `$SCRNA_SHARED_ROOT/reference/hg38/`):
 ```
 --reference PATH          reference genome FASTA
 --gtf PATH                annotation GTF
@@ -430,20 +504,16 @@ tail -f logs/batch.log
 WES mode uses BWA-MEM for alignment and is otherwise identical to bulk mode.
 Use it for whole-exome or whole-genome DNA samples.
 
-**One-time setup — build the BWA index** (takes ~90 min, only needed once):
+The BWA index is already built in the shared reference directory. To build
+one for a new reference (~90 min):
 
 ```bash
-conda run -n scrna bwa index \
-    -p data/reference/bwa_index_hg38/genome \
-    data/reference/genome.fa
+bwa index -p <reference_dir>/bwa_index_hg38/genome <reference_dir>/genome.fa
 ```
-
-The index is stored at `data/reference/bwa_index_hg38/`. Override the path
-with `--bwa-index` if you have it elsewhere.
 
 **WES-specific options:**
 ```
---bwa-index PATH    BWA index prefix directory (default: data/reference/bwa_index_hg38)
+--bwa-index PATH    BWA index prefix directory (default: shared bwa_index_hg38)
 --sequencing        always paired for WES (pass --sequencing paired)
 ```
 
@@ -528,7 +598,7 @@ Reports all samples that share at least 40% of the query's variants. Options:
 
 ```
 --vcf PATH         path to the unknown VCF (required)
---db PATH          SQLite database (default: results/variants.db)
+--db PATH          SQLite database (default: the shared DB; $SCRNA_DB)
 --min-match N      minimum match % to report (default: 40)
 --metric           overlap: shared/query total; jaccard: shared/union (default: overlap)
 ```
@@ -559,7 +629,7 @@ against reference genotypes in the DB).
 --min-positions N       min covered positions to attempt assignment (default: 200)
 --doublet-gap F         min LL gap between top two lines for a singlet call (default: 2.0)
 --no-match-threshold F  mean LL per position below which → no_match (default: -0.5)
---snps-vcf PATH         common SNP panel for cellsnp-lite (default: data/reference/genome1K.hg38.common_snps.vcf.gz)
+--snps-vcf PATH         common SNP panel for cellsnp-lite (default: the shared genome1K.hg38.common_snps.vcf.gz)
 --add-unmatched         insert unmatched Vireo donors into the DB as new unlabelled samples after matching
 --cores N               threads for cellsnp-lite (default: 16)
 ```
@@ -647,7 +717,7 @@ re-running Vireo):
 ```bash
 conda run -n scrna python scripts/match_vireo.py \
     --vireo-dir results/demux/pool_ctr_001/vireo \
-    --db results/variants.db \
+    --db /groups/nils/data/scrna_pipeline/db/variants.db \
     --run-ids SRR5071686_hg38 SRR5071667_hg38 SRR5071672_hg38 \
     --output results/demux/pool_ctr_001/donor_matches.tsv \
     --min-concordance 0.80 \
@@ -723,7 +793,7 @@ To backfill cell line labels for existing DB entries:
 
 ```python
 import sqlite3, csv
-conn = sqlite3.connect("results/variants.db")
+conn = sqlite3.connect("/groups/nils/data/scrna_pipeline/db/variants.db")
 with open("data/cell_line_map.csv") as f:
     for row in csv.DictReader(f):
         r = conn.execute("SELECT sample_id FROM samples WHERE name=?", (row["Run"],)).fetchone()
@@ -1000,18 +1070,22 @@ cat lane1_R2.fastq.gz lane2_R2.fastq.gz lane3_R2.fastq.gz > MY_SAMPLE_2.fastq.gz
 
 ### Reference files
 
-Put the genome FASTA and GTF in `data/reference/`. The STAR index is built
-automatically on first run if the directory does not exist:
+On the lab server nothing needs to be done — the shared, read-only reference
+directory already contains everything:
 
 ```
-data/reference/
-├── genome.fa
+/groups/nils/data/scrna_pipeline/reference/hg38/
+├── genome.fa (+ .fai)
 ├── genes.gtf
-├── star_index_hg38_oh99/              # built automatically (sc mode)
-├── bwa_index_hg38/                    # built once manually (wes mode)
-│   └── genome.{amb,ann,bwt,pac,sa}
-└── genome1K.hg38.common_snps.vcf.gz  # built by normalize_snp_panel (one-time)
+├── star_index_hg38_oh99/                          # sc mode
+├── bwa_index_hg38/genome.{amb,ann,bwt,pac,sa}     # wes mode
+├── genome1K.phase3.SNP_AF5e2.chr1toX.hg38.vcf     # raw 1000 Genomes panel
+└── genome1K.hg38.common_snps.vcf.gz (+ .tbi)      # normalised panel
 ```
+
+To build a new reference directory elsewhere, put the FASTA, GTF and raw SNP
+panel in a folder and pass it to `scripts/setup_shared.sh`; build the STAR
+index with the `star_index` rule and the BWA index with `bwa index` first.
 
 Naming convention: `star_index_<genome>_oh<overhang>`, where overhang = read
 length − 1. The BWA index is built with `bwa index -p bwa_index_hg38/genome genome.fa`.
@@ -1050,7 +1124,7 @@ against the full hg38 genome.
 | `results/demux/<demux_run_id>/assignments.tsv` | Binomial scorer: barcode → cell line |
 | `results/demux/<demux_run_id>/donor_matches.tsv` | Vireo donor → DB reference concordance |
 | `results/demux/<demux_run_id>/final_assignments.tsv` | Merged final cell line assignments |
-| `results/variants.db` | SQLite database with all runs, genotype calls, and cell assignments |
+| `/groups/nils/data/scrna_pipeline/db/variants.db` | Shared SQLite database with all runs, genotype calls, and cell assignments |
 
 ## Tuning parameters
 
@@ -1065,4 +1139,4 @@ against the full hg38 genome.
 | `demux.min_positions` | 200 | Minimum covered positions to attempt cell assignment |
 | `demux.doublet_gap` | 2.0 | Log-likelihood gap below which a cell is called a doublet |
 | `demux.no_match_threshold` | −0.5 | Mean LL per position below which a cell gets no_match |
-| `db_path` | `results/variants.db` | SQLite database file location |
+| `db_path` | shared `db/variants.db` | SQLite database file location |
