@@ -246,8 +246,11 @@ index on `variant_id` — avoid them live, or discuss adding an index first.
     processed without CellRanger. Also: cellsnp-lite has never actually been run by the
     pipeline end-to-end (Pool_ctr pileup was pre-computed).
 12. Grist credentials live in Andras's private `.env` (mode 600); never commit.
-13. The tutorial page was published as a claude.ai artifact under the old account; republish
-    `docs/workshop.html` from the new account if needed.
+13. The tutorial page was published as a claude.ai artifact under the old account, which the
+    new account cannot open. Republish `docs/workshop.html` from the new account. Sources of
+    **all** old-account artifacts (this project and others) are in
+    `/home/nemeth/claude_account_export/` (see its README), including a rendered transcript of
+    an earlier scrna_project session (May–June 2026) in `artifacts/transcript.md.html`.
 
 ---
 
