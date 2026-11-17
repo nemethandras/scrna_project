@@ -1064,6 +1064,15 @@ COLO201/COLO205 (same patient), HCT8/HCT15/DLD1 (shared parental line).
 | STAR alignment QC | Annotated splice % and % reads too short (sc/bulk runs, read from STAR log files) |
 | Raw SQL explorer | Text box to run any query against the database |
 
+### `notebooks/06_demo_compare.ipynb` — Workshop: four ways to demultiplex Pool_ctr
+
+Compares demux runs of the same pool side by side (by default the pre-computed
+workshop runs in `/groups/nils/data/scrna_pipeline/demo/results/demux/`): guided
+with all 7 lines, unguided, and guided with HCT8 or DLD1 left out. Shows
+assigned/doublet/unassigned counts, cell-by-cell agreement with the 7-line run,
+how the same-donor pair DLD1/HCT8 is labelled, and the unguided donor→cell-line
+matches. Edit the `RUNS` cell to compare other runs.
+
 > **Note:** If the pipeline is actively loading results to the database in the
 > background, notebook queries will hang until the write lock is released. Wait
 > for the pipeline to finish (`tail -f logs/batch.log`), then run the notebook.

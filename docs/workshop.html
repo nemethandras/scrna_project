@@ -1,0 +1,526 @@
+<title>scrna-pipeline Workshop</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap">
+<style>
+/* Layout: one reading column with a sticky contents rail on wide screens; commands sit in copyable terminal panels. */
+:root {
+  --bg: #f6f7f5;
+  --surface: #ffffff;
+  --ink: #16201d;
+  --ink-2: #4a5652;
+  --ink-3: #6f7a76;
+  --line: #dfe3e0;
+  --accent: #0f6f62;
+  --accent-soft: #e2f1ee;
+  --term-bg: #13201d;
+  --term-ink: #e4eeea;
+  --term-dim: #8fa49d;
+  --out-bg: #eef1ef;
+  --warn-bg: #fff4dc;
+  --warn-ink: #6b4a00;
+  --g1: #2a78d6; --g2: #eb6834; --g3: #1baf7a; --g4: #6250d6;
+  --gt-ref: #e7ecea; --gt-het: #cfe3f7; --gt-alt: #2a78d6; --gt-alt-ink: #ffffff;
+  --font-display: "Space Grotesk", "IBM Plex Sans", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111715; --surface: #18201d; --ink: #e8efec; --ink-2: #b9c6c1; --ink-3: #8e9c97;
+    --line: #2b3632; --accent: #4fc1ae; --accent-soft: #1d332e;
+    --term-bg: #0a100e; --term-ink: #e4eeea; --term-dim: #7f948d; --out-bg: #1f2925;
+    --warn-bg: #3a2f14; --warn-ink: #f3d692;
+    --g1: #3987e5; --g2: #d95926; --g3: #199e70; --g4: #9085e9;
+    --gt-ref: #2a3531; --gt-het: #23415f; --gt-alt: #3987e5; --gt-alt-ink: #ffffff;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111715; --surface: #18201d; --ink: #e8efec; --ink-2: #b9c6c1; --ink-3: #8e9c97;
+  --line: #2b3632; --accent: #4fc1ae; --accent-soft: #1d332e;
+  --term-bg: #0a100e; --term-ink: #e4eeea; --term-dim: #7f948d; --out-bg: #1f2925;
+  --warn-bg: #3a2f14; --warn-ink: #f3d692;
+  --g1: #3987e5; --g2: #d95926; --g3: #199e70; --g4: #9085e9;
+  --gt-ref: #2a3531; --gt-het: #23415f; --gt-alt: #3987e5; --gt-alt-ink: #ffffff;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font-body); font-size: 16px; line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 64px;
+}
+.page { max-width: 1120px; margin: 0 auto; display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; }
+@media (max-width: 900px) { .page { grid-template-columns: minmax(0, 1fr); gap: 0; } nav.toc { display: none; } }
+
+header.hero { grid-column: 1 / -1; padding-block: 48px 32px; border-bottom: 1px solid var(--line); margin-bottom: 8px; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+h1 { font-family: var(--font-display); font-weight: 600; font-size: clamp(2rem, 4.5vw, 3rem); line-height: 1.1; margin: 8px 0 12px; text-wrap: balance; letter-spacing: -0.01em; }
+.lede { font-size: 1.125rem; color: var(--ink-2); max-width: 62ch; margin: 0; }
+.facts { display: flex; flex-wrap: wrap; gap: 8px 24px; margin-top: 20px; font-size: 14px; color: var(--ink-3); }
+.facts b { color: var(--ink); font-weight: 600; }
+
+nav.toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 24px); align-self: start; padding-top: 32px; font-size: 14px; }
+nav.toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; counter-reset: toc; }
+nav.toc li { counter-increment: toc; }
+nav.toc a { display: flex; gap: 10px; padding: 6px 10px; border-radius: 6px; color: var(--ink-2); text-decoration: none; }
+nav.toc a::before { content: counter(toc); font-family: var(--font-mono); color: var(--ink-3); min-width: 1ch; }
+nav.toc a:hover, nav.toc a:focus-visible { background: var(--accent-soft); color: var(--ink); outline: none; }
+nav.toc .toc-note { margin-top: 16px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink-3); font-size: 13px; line-height: 1.5; }
+
+main { min-width: 0; }
+section { padding-block: 40px 8px; border-bottom: 1px solid var(--line); }
+section:last-of-type { border-bottom: 0; }
+h2 { font-family: var(--font-display); font-weight: 600; font-size: 1.75rem; line-height: 1.2; margin: 0 0 12px; text-wrap: balance; display: flex; gap: 14px; align-items: baseline; }
+h2 .num { font-family: var(--font-mono); font-size: 0.95rem; color: var(--accent); font-weight: 500; }
+h3 { font-family: var(--font-display); font-weight: 600; font-size: 1.2rem; margin: 32px 0 8px; }
+p, li { max-width: 68ch; }
+p { margin: 0 0 14px; }
+a { color: var(--accent); }
+code { font-family: var(--font-mono); font-size: 0.9em; background: var(--out-bg); padding: 1px 5px; border-radius: 4px; }
+.muted { color: var(--ink-3); }
+
+/* Terminal panels */
+.cmd { margin: 12px 0 18px; border-radius: 10px; background: var(--term-bg); color: var(--term-ink); overflow: hidden; }
+.cmd-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px 8px 14px; font-family: var(--font-mono); font-size: 12px; color: var(--term-dim); border-bottom: 1px solid rgba(255,255,255,0.07); }
+.copy { font-family: var(--font-body); font-size: 12px; font-weight: 500; color: var(--term-ink); background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+.copy:hover { background: rgba(255,255,255,0.16); }
+.copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.copy.done { color: #9fe3cf; border-color: #9fe3cf; }
+.cmd pre { margin: 0; padding: 14px; overflow-x: auto; font-family: var(--font-mono); font-size: 13.5px; line-height: 1.55; white-space: pre; }
+.cmd pre .c { color: var(--term-dim); }
+
+.out { margin: -8px 0 20px; border: 1px solid var(--line); border-radius: 10px; background: var(--out-bg); overflow: hidden; }
+.out-head { padding: 6px 14px; font-size: 12px; font-family: var(--font-mono); color: var(--ink-3); border-bottom: 1px solid var(--line); }
+.out pre { margin: 0; padding: 12px 14px; overflow-x: auto; font-family: var(--font-mono); font-size: 13px; line-height: 1.5; color: var(--ink-2); white-space: pre; }
+
+.note { margin: 16px 0; padding: 12px 16px; border-radius: 8px; background: var(--warn-bg); color: var(--warn-ink); font-size: 15px; }
+.note b { font-weight: 600; }
+
+/* Pipeline diagram */
+.lanes { display: grid; gap: 14px; margin: 20px 0 8px; }
+.lane { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+.lane-title { font-size: 13px; font-weight: 600; color: var(--ink-2); margin-bottom: 10px; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.lane-title span { font-family: var(--font-mono); font-weight: 400; color: var(--ink-3); }
+.flow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.step { font-size: 13.5px; padding: 6px 10px; border-radius: 6px; background: var(--out-bg); border: 1px solid var(--line); white-space: nowrap; }
+.step.db { background: var(--accent); color: var(--surface); border-color: var(--accent); font-weight: 600; }
+.arrow { color: var(--ink-3); font-family: var(--font-mono); }
+
+/* Tables */
+.tbl-wrap { overflow-x: auto; margin: 12px 0 20px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+th, td { text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-3); font-weight: 600; background: var(--out-bg); }
+tr:last-child td { border-bottom: 0; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+td code { white-space: nowrap; }
+
+.gt { display: inline-block; min-width: 3.2em; text-align: center; font-family: var(--font-mono); font-size: 12.5px; padding: 1px 6px; border-radius: 4px; background: var(--gt-ref); color: var(--ink); }
+.gt.het { background: var(--gt-het); }
+.gt.alt { background: var(--gt-alt); color: var(--gt-alt-ink); }
+.gt.none { background: transparent; color: var(--ink-3); border: 1px dashed var(--line); }
+
+/* Group cards */
+.groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin: 16px 0 8px; }
+.gcard { background: var(--surface); border: 1px solid var(--line); border-top: 4px solid var(--gc); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+.gcard h4 { margin: 0 0 4px; font-family: var(--font-display); font-size: 1.05rem; font-weight: 600; }
+.gcard .gid { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink-3); }
+.gcard p { font-size: 14px; color: var(--ink-2); margin: 8px 0 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+.chip { font-family: var(--font-mono); font-size: 12px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); background: var(--out-bg); }
+.chip.out-of-pool { text-decoration: line-through; color: var(--ink-3); background: transparent; border-style: dashed; }
+.chip.sib { border-color: var(--ink-2); font-weight: 500; }
+
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 16px 0 0; }
+.tab { font: inherit; font-size: 14px; font-weight: 500; padding: 7px 14px; border-radius: 8px 8px 0 0; border: 1px solid var(--line); border-bottom: 0; background: var(--out-bg); color: var(--ink-2); cursor: pointer; position: relative; }
+.tab::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--gc); margin-right: 8px; vertical-align: 1px; }
+.tab[aria-selected="true"] { background: var(--surface); color: var(--ink); }
+.tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tabpanel { border: 1px solid var(--line); border-radius: 0 10px 10px 10px; background: var(--surface); padding: 6px 16px 4px; }
+
+ol.steps { padding-left: 1.3em; }
+ol.steps > li { margin-bottom: 6px; }
+
+details { margin: 14px 0; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+summary { cursor: pointer; padding: 12px 16px; font-weight: 600; }
+summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+details > div { padding: 0 16px 8px; }
+
+dl.paths { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 18px; font-size: 14.5px; }
+dl.paths dt { color: var(--ink-3); }
+dl.paths dd { margin: 0; font-family: var(--font-mono); font-size: 13px; overflow-wrap: anywhere; }
+@media (max-width: 560px) { dl.paths { grid-template-columns: minmax(0, 1fr); } dl.paths dd { margin-bottom: 8px; } }
+
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+</style>
+
+<div class="page">
+  <header class="hero">
+    <div class="eyebrow">Nils lab · hands-on session</div>
+    <h1>scrna-pipeline Workshop</h1>
+    <p class="lede">Which cell line did each cell in a pooled single-cell experiment come from? We tour the pipeline that answers this, then demultiplex one real pool four different ways and compare.</p>
+    <div class="facts">
+      <span><b>Server</b> menten (your usual login)</span>
+      <span><b>Data</b> Pool_ctr · 10,308 cells · 7 colorectal lines</span>
+      <span><b>Format</b> 4 groups</span>
+      <span><b>Needs</b> a terminal and VS Code</span>
+    </div>
+  </header>
+
+  <nav class="toc" aria-label="Contents">
+    <ol>
+      <li><a href="#setup">Before you start</a></li>
+      <li><a href="#how">How the pipeline works</a></li>
+      <li><a href="#dryrun">Dry run a reference sample</a></li>
+      <li><a href="#database">The shared database</a></li>
+      <li><a href="#exercise">Group exercise</a></li>
+      <li><a href="#compare">Compare the runs</a></li>
+      <li><a href="#discuss">Discussion</a></li>
+      <li><a href="#help">If something goes wrong</a></li>
+    </ol>
+    <div class="toc-note">Every grey-green box has a <b>Copy</b> button. Paste into your terminal and press Enter.</div>
+  </nav>
+
+  <main>
+    <section id="setup">
+      <h2><span class="num">1</span>Before you start</h2>
+      <p>Everything is already installed on the server. You only need to make the pipeline's commands available in your terminal and create a personal folder for your own outputs.</p>
+      <div class="cmd"><div class="cmd-head">terminal · run once per terminal window<button class="copy" type="button">Copy</button></div><pre>export PATH=/groups/nils/data/scrna_pipeline/bin:/groups/nils/data/scrna_pipeline/env/bin:$PATH
+mkdir -p ~/scrna_demo && cd ~/scrna_demo
+scrna-pipeline --help | head -15</pre></div>
+      <p>The help text lists the three modes: <code>bulk</code> (RNA-seq reference profiles), <code>wes</code> (whole-exome reference profiles) and <code>scrna</code> (demultiplexing a pooled sample). The <code>PATH</code> change only lasts for this terminal window. Add the same line to <code>~/.bashrc</code> to keep it.</p>
+    </section>
+
+    <section id="how">
+      <h2><span class="num">2</span>How the pipeline works</h2>
+      <p>Every person's genome carries a unique combination of common SNPs: positions where people differ, such as G or C at one base. Cell lines inherit the SNPs of the person they came from, so a few thousand SNP genotypes act as a fingerprint for each cell line.</p>
+      <p>The pipeline works in two halves that meet at a shared database:</p>
+      <div class="lanes">
+        <div class="lane">
+          <div class="lane-title">A · Build a fingerprint for each cell line <span>modes: bulk, wes</span></div>
+          <div class="flow">
+            <span class="step">FASTQ reads</span><span class="arrow">→</span>
+            <span class="step">align (STAR for RNA, BWA for WES)</span><span class="arrow">→</span>
+            <span class="step">pile up reads at 7M common SNPs</span><span class="arrow">→</span>
+            <span class="step">call genotypes 0/0 · 0/1 · 1/1</span><span class="arrow">→</span>
+            <span class="step db">shared database</span>
+          </div>
+        </div>
+        <div class="lane">
+          <div class="lane-title">B · Assign each cell in a pool <span>mode: scrna</span></div>
+          <div class="flow">
+            <span class="step">pooled scRNA BAM</span><span class="arrow">→</span>
+            <span class="step">count alleles per cell (cellsnp-lite)</span><span class="arrow">→</span>
+            <span class="step">cluster cells by genotype (Vireo)</span><span class="arrow">→</span>
+            <span class="step db">match to database</span><span class="arrow">→</span>
+            <span class="step">cell → cell line</span>
+          </div>
+        </div>
+      </div>
+      <p class="muted">The 7M SNP positions are the common variants (allele frequency above 5%) from the 1000 Genomes Project. The database currently holds fingerprints for 54 runs: 44 RNA-seq cell line profiles and 10 WES organoid samples.</p>
+      <p>Vireo can run in two ways, and that difference is what the group exercise is about:</p>
+      <ul>
+        <li><b>Guided:</b> you tell Vireo which cell lines are in the pool, and their fingerprints from the database are used as the starting point.</li>
+        <li><b>Unguided:</b> Vireo only knows how many donors to look for. It groups cells by genotype first, and afterwards each group is compared with every fingerprint in the database.</li>
+      </ul>
+    </section>
+
+    <section id="dryrun">
+      <h2><span class="num">3</span>Dry run a reference sample</h2>
+      <p>A dry run shows every step the pipeline <em>would</em> run, with its inputs and outputs, without processing any data. We use the bulk RNA-seq profile of DLD1, one of the lines in our pool.</p>
+      <div class="cmd"><div class="cmd-head">terminal · in ~/scrna_demo<button class="copy" type="button">Copy</button></div><pre>scrna-pipeline --mode bulk --sample SRR5071662 --run-id demo_DLD1 \
+    --fastq-dir /groups/nils/data/scrna_pipeline/demo/fastq/SRR5071662 --dry-run</pre></div>
+      <div class="out"><div class="out-head">you should see (top of the output)</div><pre>Job stats:
+job                  count
+-----------------  -------
+fastqc                   1
+star_align               1
+samtools_sort            1
+samtools_flagstat        1
+samtools_index           1
+bcftools_mpileup         1
+bcftools_call            1
+bcftools_filter          1
+load_to_database         1
+all                      1
+total                   10</pre></div>
+      <p>Below the table, each job is listed with its input and output files. What each step does:</p>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>Job</th><th>What it does</th></tr></thead>
+        <tbody>
+          <tr><td><code>fastqc</code></td><td>Read-quality report for the raw FASTQ.</td></tr>
+          <tr><td><code>star_align</code></td><td>Aligns RNA reads to the hg38 genome, splice-aware. (WES samples use <code>bwa_align</code> instead.)</td></tr>
+          <tr><td><code>samtools_sort</code>, <code>samtools_index</code></td><td>Sorts and indexes the alignments so regions can be read quickly.</td></tr>
+          <tr><td><code>samtools_flagstat</code></td><td>Alignment statistics, recorded with the run.</td></tr>
+          <tr><td><code>bcftools_mpileup</code></td><td>Counts reference and alternative bases at each of the 7M common SNP positions.</td></tr>
+          <tr><td><code>bcftools_call</code></td><td>Turns those counts into genotypes: <span class="gt">0/0</span> both copies reference, <span class="gt het">0/1</span> one of each, <span class="gt alt">1/1</span> both alternative.</td></tr>
+          <tr><td><code>bcftools_filter</code></td><td>Keeps positions with at least 10 reads, and alternative calls with quality of at least 30.</td></tr>
+          <tr><td><code>load_to_database</code></td><td>Adds the genotypes to the shared database, recording who added them and with which pipeline version.</td></tr>
+        </tbody>
+      </table></div>
+      <p>The same for a whole-exome sample: note <code>bwa_align</code> instead of <code>star_align</code>.</p>
+      <div class="cmd"><div class="cmd-head">terminal · in ~/scrna_demo<button class="copy" type="button">Copy</button></div><pre>scrna-pipeline --mode wes --sequencing paired --sample B2006 --run-id demo_B2006 \
+    --fastq-dir /groups/nils/data/scrna_pipeline/demo/fastq/B2006 --dry-run</pre></div>
+      <p class="muted">For real runs, drop <code>--dry-run</code>. Measured on this server, an RNA-seq profile takes 14 minutes (median of 40 runs, range 6–92 min). A WES sample takes 3–5.4 hours. Runs detach automatically, so you can close your laptop.</p>
+    </section>
+
+    <section id="database">
+      <h2><span class="num">4</span>The shared database</h2>
+      <p>All fingerprints live in one SQLite file that everyone in the lab reads from and adds to. It has four tables:</p>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>Table</th><th>One row per</th><th class="num">Rows</th></tr></thead>
+        <tbody>
+          <tr><td><code>samples</code></td><td>sample, with its cell line name</td><td class="num">54</td></tr>
+          <tr><td><code>runs</code></td><td>pipeline run: date, sequencing type, who added it, pipeline version</td><td class="num">54</td></tr>
+          <tr><td><code>variants</code></td><td>SNP position and its alleles</td><td class="num">3,258,091</td></tr>
+          <tr><td><code>genotype_calls</code></td><td>genotype of one run at one SNP</td><td class="num">8,571,777</td></tr>
+        </tbody>
+      </table></div>
+      <p>Open it read-only, so a mistyped command can't change anything:</p>
+      <div class="cmd"><div class="cmd-head">terminal<button class="copy" type="button">Copy</button></div><pre>DB=/groups/nils/data/scrna_pipeline/db/variants.db
+sqlite3 -readonly -header -column $DB "SELECT COUNT(*) AS runs FROM runs;"</pre></div>
+
+      <h3>Which pool lines have a fingerprint?</h3>
+      <div class="cmd"><div class="cmd-head">terminal<button class="copy" type="button">Copy</button></div><pre>sqlite3 -readonly -header -column $DB "
+SELECT s.cell_line, r.run_id, r.total_filt AS genotyped_positions, r.added_by
+FROM runs r JOIN samples s USING (sample_id)
+WHERE s.cell_line IN ('RKO','HCT116','HT29','HCT8','CACO2','DLD1','LIM1215')
+ORDER BY s.cell_line;"</pre></div>
+      <div class="out"><div class="out-head">you should see</div><pre>cell_line  run_id           genotyped_positions  added_by
+---------  ---------------  -------------------  --------
+CACO2      SRR5071657_hg38                15499  nemeth
+DLD1       SRR5071662_hg38                30911  nemeth
+HCT116     SRR5071667_hg38                23365  nemeth
+HCT8       SRR5071669_hg38                50428  nemeth
+HT29       SRR5071672_hg38                12743  nemeth
+LIM1215    SRR5071677_hg38                42049  nemeth
+RKO        SRR5071686_hg38                18425  nemeth</pre></div>
+
+      <h3>One SNP across all seven lines</h3>
+      <p>rs1042522 sits in <i>TP53</i> codon 72 (chr17:7,676,154, G&gt;C), the well-known Pro72Arg polymorphism. Here are the seven lines side by side:</p>
+      <div class="cmd"><div class="cmd-head">terminal<button class="copy" type="button">Copy</button></div><pre>sqlite3 -readonly -header -column $DB "
+SELECT v.chromosome || ':' || v.position AS snp,
+  MAX(CASE WHEN g.run_id = 'SRR5071686_hg38' THEN g.genotype END) AS RKO,
+  MAX(CASE WHEN g.run_id = 'SRR5071667_hg38' THEN g.genotype END) AS HCT116,
+  MAX(CASE WHEN g.run_id = 'SRR5071672_hg38' THEN g.genotype END) AS HT29,
+  MAX(CASE WHEN g.run_id = 'SRR5071657_hg38' THEN g.genotype END) AS CACO2,
+  MAX(CASE WHEN g.run_id = 'SRR5071677_hg38' THEN g.genotype END) AS LIM1215,
+  MAX(CASE WHEN g.run_id = 'SRR5071662_hg38' THEN g.genotype END) AS DLD1,
+  MAX(CASE WHEN g.run_id = 'SRR5071669_hg38' THEN g.genotype END) AS HCT8
+FROM genotype_calls g JOIN variants v USING (variant_id)
+WHERE v.chromosome = 'chr17' AND v.position = 7676154
+GROUP BY v.position;"</pre></div>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>SNP</th><th>RKO</th><th>HCT116</th><th>HT29</th><th>CACO2</th><th>LIM1215</th><th>DLD1</th><th>HCT8</th></tr></thead>
+        <tbody><tr><td><code>chr17:7676154</code></td>
+          <td><span class="gt het">0/1</span></td><td><span class="gt alt">1/1</span></td><td><span class="gt">0/0</span></td>
+          <td><span class="gt none">no call</span></td><td><span class="gt alt">1/1</span></td><td><span class="gt alt">1/1</span></td><td><span class="gt alt">1/1</span></td></tr></tbody>
+      </table></div>
+      <p>One SNP can't tell seven lines apart: four of them are <span class="gt alt">1/1</span> here. The pipeline combines tens of thousands of positions. CACO2 has no call because too few reads covered this position in its RNA-seq data. Fingerprints from RNA only see expressed genes.</p>
+    </section>
+
+    <section id="exercise">
+      <h2><span class="num">5</span>Group exercise: one pool, four runs</h2>
+      <p><b>Pool_ctr</b> is a single 10x Genomics run with 10,308 cells from seven colorectal cancer lines. The per-cell allele counts (the cellsnp-lite step) are already computed, so each run starts at the genotype-matching step.</p>
+      <p>The twist: <b>DLD1 and HCT8 were derived from the same patient</b>, so their fingerprints are almost identical. Each group gives Vireo different information about the pool:</p>
+      <div class="groups">
+        <div class="gcard" style="--gc: var(--g1)"><h4>Group 1 · Guided, all 7</h4><div class="gid">group1_guided7</div>
+          <div class="chips"><span class="chip">RKO</span><span class="chip">HCT116</span><span class="chip">HT29</span><span class="chip sib">HCT8</span><span class="chip">CACO2</span><span class="chip sib">DLD1</span><span class="chip">LIM1215</span></div>
+          <p>The full, correct list.</p></div>
+        <div class="gcard" style="--gc: var(--g2)"><h4>Group 2 · Unguided</h4><div class="gid">group2_unguided</div>
+          <div class="chips"><span class="chip">7 donors, names unknown</span></div>
+          <p>No names. Vireo finds 7 groups, then each is matched against all 54 database fingerprints.</p></div>
+        <div class="gcard" style="--gc: var(--g3)"><h4>Group 3 · Guided, no HCT8</h4><div class="gid">group3_no_hct8</div>
+          <div class="chips"><span class="chip">RKO</span><span class="chip">HCT116</span><span class="chip">HT29</span><span class="chip out-of-pool">HCT8</span><span class="chip">CACO2</span><span class="chip sib">DLD1</span><span class="chip">LIM1215</span></div>
+          <p>HCT8 is in the pool but missing from the list.</p></div>
+        <div class="gcard" style="--gc: var(--g4)"><h4>Group 4 · Guided, no DLD1</h4><div class="gid">group4_no_dld1</div>
+          <div class="chips"><span class="chip">RKO</span><span class="chip">HCT116</span><span class="chip">HT29</span><span class="chip sib">HCT8</span><span class="chip">CACO2</span><span class="chip out-of-pool">DLD1</span><span class="chip">LIM1215</span></div>
+          <p>DLD1 is in the pool but missing from the list.</p></div>
+      </div>
+      <div class="note"><b>One person per group</b> launches the run, and the others follow along on that screen. Two people launching the same group ID will collide.</div>
+
+      <h3>Step 1 · Go to the shared demo folder</h3>
+      <p>All groups work in the same folder, so every group can see everyone's results afterwards.</p>
+      <div class="cmd"><div class="cmd-head">terminal · everyone<button class="copy" type="button">Copy</button></div><pre>cd /groups/nils/data/scrna_pipeline/demo
+ls data/Pool_ctr/cellsnp</pre></div>
+
+      <h3>Step 2 · Preview, launch, and watch your run</h3>
+      <p>Pick your group. <code>--dry-run</code> prints the exact commands the run will execute. Read through it before launching.</p>
+      <div class="tabs" role="tablist" aria-label="Group commands">
+        <button class="tab" role="tab" id="tab-1" aria-controls="panel-1" aria-selected="true" style="--gc: var(--g1)" type="button">Group 1</button>
+        <button class="tab" role="tab" id="tab-2" aria-controls="panel-2" aria-selected="false" style="--gc: var(--g2)" type="button" tabindex="-1">Group 2</button>
+        <button class="tab" role="tab" id="tab-3" aria-controls="panel-3" aria-selected="false" style="--gc: var(--g3)" type="button" tabindex="-1">Group 3</button>
+        <button class="tab" role="tab" id="tab-4" aria-controls="panel-4" aria-selected="false" style="--gc: var(--g4)" type="button" tabindex="-1">Group 4</button>
+      </div>
+
+      <div class="tabpanel" role="tabpanel" id="panel-1" aria-labelledby="tab-1">
+        <p><b>Guided, all 7 lines.</b> Expected time: about 1 minute.</p>
+        <div class="cmd"><div class="cmd-head">2a · preview<button class="copy" type="button">Copy</button></div><pre>scrna-pipeline --mode scrna --cellsnp-dir data/Pool_ctr/cellsnp --cores 1 \
+    --demux-run-id group1_guided7 \
+    --known-lines RKO HCT116 HT29 HCT8 CACO2 DLD1 LIM1215 --dry-run</pre></div>
+        <div class="cmd"><div class="cmd-head">2b · launch<button class="copy" type="button">Copy</button></div><pre>scrna-pipeline --mode scrna --cellsnp-dir data/Pool_ctr/cellsnp --cores 1 \
+    --demux-run-id group1_guided7 \
+    --known-lines RKO HCT116 HT29 HCT8 CACO2 DLD1 LIM1215</pre></div>
+        <div class="cmd"><div class="cmd-head">2c · watch (Ctrl+C stops watching, not the run)<button class="copy" type="button">Copy</button></div><pre>tail -f logs/demux/group1_guided7.log</pre></div>
+      </div>
+      <div class="tabpanel" role="tabpanel" id="panel-2" aria-labelledby="tab-2" hidden>
+        <p><b>Unguided, 7 donors.</b> Expected time: about 80 minutes on one core, much longer than the guided runs. Launch it first, then follow along with the other groups. If it hasn't finished by section 6, compare using the pre-computed run, which the notebook uses by default.</p>
+        <div class="cmd"><div class="cmd-head">2a · preview<button class="copy" type="button">Copy</button></div><pre>scrna-pipeline --mode scrna --cellsnp-dir data/Pool_ctr/cellsnp --cores 1 \
+    --demux-run-id group2_unguided \
+    --n-donors 7 --unique --dry-run</pre></div>
+        <div class="cmd"><div class="cmd-head">2b · launch<button class="copy" type="button">Copy</button></div><pre>scrna-pipeline --mode scrna --cellsnp-dir data/Pool_ctr/cellsnp --cores 1 \
+    --demux-run-id group2_unguided \
+    --n-donors 7 --unique</pre></div>
+        <div class="cmd"><div class="cmd-head">2c · watch (Ctrl+C stops watching, not the run)<button class="copy" type="button">Copy</button></div><pre>tail -f logs/demux/group2_unguided.log</pre></div>
+        <p class="muted"><code>--unique</code> makes each Vireo donor match a different database fingerprint, so two donors can't both claim the same cell line.</p>
+      </div>
+      <div class="tabpanel" role="tabpanel" id="panel-3" aria-labelledby="tab-3" hidden>
+        <p><b>Guided, 6 lines without HCT8.</b> Expected time: about 1 minute.</p>
+        <div class="cmd"><div class="cmd-head">2a · preview<button class="copy" type="button">Copy</button></div><pre>scrna-pipeline --mode scrna --cellsnp-dir data/Pool_ctr/cellsnp --cores 1 \
+    --demux-run-id group3_no_hct8 \
+    --known-lines RKO HCT116 HT29 CACO2 DLD1 LIM1215 --dry-run</pre></div>
+        <div class="cmd"><div class="cmd-head">2b · launch<button class="copy" type="button">Copy</button></div><pre>scrna-pipeline --mode scrna --cellsnp-dir data/Pool_ctr/cellsnp --cores 1 \
+    --demux-run-id group3_no_hct8 \
+    --known-lines RKO HCT116 HT29 CACO2 DLD1 LIM1215</pre></div>
+        <div class="cmd"><div class="cmd-head">2c · watch (Ctrl+C stops watching, not the run)<button class="copy" type="button">Copy</button></div><pre>tail -f logs/demux/group3_no_hct8.log</pre></div>
+      </div>
+      <div class="tabpanel" role="tabpanel" id="panel-4" aria-labelledby="tab-4" hidden>
+        <p><b>Guided, 6 lines without DLD1.</b> Expected time: about 1 minute.</p>
+        <div class="cmd"><div class="cmd-head">2a · preview<button class="copy" type="button">Copy</button></div><pre>scrna-pipeline --mode scrna --cellsnp-dir data/Pool_ctr/cellsnp --cores 1 \
+    --demux-run-id group4_no_dld1 \
+    --known-lines RKO HCT116 HT29 HCT8 CACO2 LIM1215 --dry-run</pre></div>
+        <div class="cmd"><div class="cmd-head">2b · launch<button class="copy" type="button">Copy</button></div><pre>scrna-pipeline --mode scrna --cellsnp-dir data/Pool_ctr/cellsnp --cores 1 \
+    --demux-run-id group4_no_dld1 \
+    --known-lines RKO HCT116 HT29 HCT8 CACO2 LIM1215</pre></div>
+        <div class="cmd"><div class="cmd-head">2c · watch (Ctrl+C stops watching, not the run)<button class="copy" type="button">Copy</button></div><pre>tail -f logs/demux/group4_no_dld1.log</pre></div>
+      </div>
+
+      <h3>What the log shows</h3>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>Log line</th><th>What is happening</th></tr></thead>
+        <tbody>
+          <tr><td><code>--- demux (binomial scorer) ---</code></td><td>A quick first pass: each cell's allele counts are scored against every fingerprint in the database.</td></tr>
+          <tr><td><code>--- building donor reference VCF from DB ---</code></td><td>Guided runs only: the listed lines' fingerprints are exported for Vireo.</td></tr>
+          <tr><td><code>--- vireo (… clustering) ---</code></td><td>Vireo assigns every cell to a donor, or calls it a doublet (two cells in one droplet) or unassigned.</td></tr>
+          <tr><td><code>--- matching Vireo donors to DB ---</code></td><td>Unguided only: each anonymous donor's genotype is compared with all 54 fingerprints.</td></tr>
+          <tr><td><code>Done: …</code></td><td>Finished. Your results are in <code>results/demux/&lt;your id&gt;/final_assignments.tsv</code>.</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>Step 3 · Look at your result</h3>
+      <p>Replace <code>group1_guided7</code> with your group's ID. This counts how many cells got each label:</p>
+      <div class="cmd"><div class="cmd-head">terminal<button class="copy" type="button">Copy</button></div><pre>RUN=group1_guided7
+cut -f2 results/demux/$RUN/final_assignments.tsv | tail -n +2 | sort | uniq -c | sort -rn | head -15</pre></div>
+    </section>
+
+    <section id="compare">
+      <h2><span class="num">6</span>Compare the four runs</h2>
+      <p>A notebook puts all four runs side by side. Copy it to your own folder, so you can edit and save it.</p>
+      <div class="cmd"><div class="cmd-head">terminal<button class="copy" type="button">Copy</button></div><pre>cp /groups/nils/data/scrna_pipeline/code/notebooks/06_demo_compare.ipynb ~/scrna_demo/
+code ~/scrna_demo/06_demo_compare.ipynb</pre></div>
+      <ol class="steps">
+        <li>In VS Code, click <b>Select Kernel</b> (top right) → <b>Python Environments…</b> → <b>Enter interpreter path</b>, and paste <code>/groups/nils/data/scrna_pipeline/env/bin/python</code></li>
+        <li>The notebook opens pointing at <b>pre-computed</b> results for all four runs, so it works even before your run finishes. To use your group's own run, change its ID in the <code>RUNS</code> cell, for example <code>'precomputed_guided7'</code> → <code>'group1_guided7'</code>.</li>
+        <li>Click <b>Run All</b>.</li>
+      </ol>
+      <p>The notebook shows:</p>
+      <ul>
+        <li>a summary table: how many cells each run assigned to a single line;</li>
+        <li>a grid of cell counts per label for each run;</li>
+        <li>cell-by-cell agreement with the 7-line guided run: where does each cell go in the other runs?</li>
+        <li>the DLD1/HCT8 family: how each run labels those cells;</li>
+        <li>for the unguided run, which anonymous donor matched which cell line, and how confidently.</li>
+      </ul>
+      <p class="muted">No VS Code? Render the notebook to a web page instead: <code>jupyter nbconvert --to html --execute ~/scrna_demo/06_demo_compare.ipynb</code>, then open <code>06_demo_compare.html</code>.</p>
+    </section>
+
+    <section id="discuss">
+      <h2><span class="num">7</span>Discussion</h2>
+      <ol class="steps">
+        <li>Which run assigned the most cells to a single line? Does more assigned mean more correct?</li>
+        <li>In the full 7-line run, why are so few cells called DLD1 or HCT8, and so many called an "HCT8+DLD1 doublet"?</li>
+        <li>What happens to HCT8 cells when HCT8 is left off the list? And to DLD1 cells when DLD1 is left off?</li>
+        <li>The unguided run needs no prior knowledge. What does it get right, and where does it struggle?</li>
+        <li>What does this mean for designing a pool, and for reporting which cell lines you sequenced?</li>
+      </ol>
+      <details>
+        <summary>Facilitator notes: what the pre-computed runs show</summary>
+        <div>
+          <div class="tbl-wrap"><table>
+            <thead><tr><th>Run</th><th class="num">Assigned to a line</th><th class="num">DLD1</th><th class="num">HCT8</th><th class="num">"HCT8+DLD1 doublet"</th><th class="num">Unassigned</th></tr></thead>
+            <tbody>
+              <tr><td>Guided, all 7</td><td class="num">8,338</td><td class="num">33</td><td class="num">3</td><td class="num">198</td><td class="num">1,269</td></tr>
+              <tr><td>Unguided</td><td class="num">6,508</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">662 + 1,803 unmatched</td></tr>
+              <tr><td>Guided, no HCT8</td><td class="num">8,649</td><td class="num">342</td><td class="num">—</td><td class="num">0</td><td class="num">1,119</td></tr>
+              <tr><td>Guided, no DLD1</td><td class="num">8,636</td><td class="num">—</td><td class="num">340</td><td class="num">0</td><td class="num">1,123</td></tr>
+            </tbody>
+          </table></div>
+          <p><b>The key point:</b> genotypes identify the <em>donor</em>, not the cell line. Given both DLD1 and HCT8, Vireo can't choose between two near-identical fingerprints and calls about 200 cells a mixture of the two. Given only one, it sends that whole family (about 340 cells) to whichever sibling is on the list. The guided runs therefore look <em>more</em> successful when a line is left out, even though they can't be right about which sibling the cells are.</p>
+          <p><b>Unguided:</b> three of the seven donors are matched. RKO (concordance 0.90) and HCT116 (0.87) are matched with high confidence, HT29 (0.83) with low confidence because its lead over the runner-up is small. The other four donors (1,803 cells) stay unmatched: with one-to-one matching, their best remaining fingerprint scored only 0.71–0.75, below the 0.80 threshold. So CACO2, LIM1215 and the DLD1/HCT8 family never appear by name. The unguided run also calls far more doublets (1,335 vs 701). Knowing what is in the pool helps a lot. Without that knowledge, the pipeline still finds the large populations and reports the rest honestly as unknown, instead of guessing.</p>
+        </div>
+      </details>
+    </section>
+
+    <section id="help">
+      <h2><span class="num">8</span>If something goes wrong</h2>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>Message</th><th>Fix</th></tr></thead>
+        <tbody>
+          <tr><td><code>scrna-pipeline: command not found</code></td><td>Run the <code>export PATH=…</code> line from section 1 in this terminal.</td></tr>
+          <tr><td><code>not found on PATH: samtools, …</code></td><td>Same fix: the shared environment isn't on your <code>PATH</code>.</td></tr>
+          <tr><td><code>Permission denied</code> under <code>results/demux/…</code></td><td>Someone else already launched that group ID. Use your group's ID, or ask who launched it.</td></tr>
+          <tr><td><code>Database locked by … — waiting...</code></td><td>Someone is adding data at that moment. It continues by itself once they finish.</td></tr>
+          <tr><td>Notebook says <code>… not found yet — skipped</code></td><td>That run hasn't finished. Use its <code>precomputed_…</code> ID for now.</td></tr>
+        </tbody>
+      </table></div>
+      <h3>Where things live</h3>
+      <dl class="paths">
+        <dt>Launcher</dt><dd>/groups/nils/data/scrna_pipeline/bin/scrna-pipeline</dd>
+        <dt>Pipeline code</dt><dd>/groups/nils/data/scrna_pipeline/code</dd>
+        <dt>Environment</dt><dd>/groups/nils/data/scrna_pipeline/env</dd>
+        <dt>Reference genome</dt><dd>/groups/nils/data/scrna_pipeline/reference/hg38 (read-only)</dd>
+        <dt>Database</dt><dd>/groups/nils/data/scrna_pipeline/db/variants.db</dd>
+        <dt>Workshop folder</dt><dd>/groups/nils/data/scrna_pipeline/demo</dd>
+      </dl>
+    </section>
+  </main>
+</div>
+
+<script>
+document.querySelectorAll('.copy').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    var pre = btn.closest('.cmd').querySelector('pre');
+    var text = pre.innerText.replace(/\s+$/, '');
+    function done() { btn.textContent = 'Copied'; btn.classList.add('done'); setTimeout(function () { btn.textContent = 'Copy'; btn.classList.remove('done'); }, 1600); }
+    function fallback() { var r = document.createRange(); r.selectNodeContents(pre); var s = window.getSelection(); s.removeAllRanges(); s.addRange(r); btn.textContent = 'Selected · Ctrl+C'; }
+    try { navigator.clipboard.writeText(text).then(done, fallback); } catch (e) { fallback(); }
+  });
+});
+
+var tabs = Array.prototype.slice.call(document.querySelectorAll('.tab'));
+function select(tab) {
+  tabs.forEach(function (t) {
+    var on = t === tab;
+    t.setAttribute('aria-selected', on ? 'true' : 'false');
+    t.tabIndex = on ? 0 : -1;
+    document.getElementById(t.getAttribute('aria-controls')).hidden = !on;
+  });
+  try { localStorage.setItem('workshop-group', tab.id); } catch (e) {}
+}
+tabs.forEach(function (t, i) {
+  t.addEventListener('click', function () { select(t); });
+  t.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+      var next = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+      select(next); next.focus(); e.preventDefault();
+    }
+  });
+});
+try { var saved = localStorage.getItem('workshop-group'); if (saved && document.getElementById(saved)) select(document.getElementById(saved)); } catch (e) {}
+</script>
