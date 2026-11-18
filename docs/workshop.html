@@ -233,9 +233,9 @@ scrna-pipeline --help | head -15</pre></div>
 
     <section id="dryrun">
       <h2><span class="num">3</span>Dry run a reference sample</h2>
-      <p>A dry run shows every step the pipeline <em>would</em> run, with its inputs and outputs, without processing any data. We use the bulk RNA-seq profile of DLD1, one of the lines in our pool.</p>
+      <p>A dry run shows every step the pipeline <em>would</em> run, with its inputs and outputs, without processing any data. We use the bulk RNA-seq profile of DLD1, one of the lines in our pool. <code>--no-db</code> leaves out the database step, so these commands can never add anything to the shared database.</p>
       <div class="cmd"><div class="cmd-head">terminal · in ~/scrna_demo<button class="copy" type="button">Copy</button></div><pre>scrna-pipeline --mode bulk --sample SRR5071662 --run-id demo_DLD1 \
-    --fastq-dir /groups/nils/data/scrna_pipeline/demo/fastq/SRR5071662 --dry-run</pre></div>
+    --fastq-dir /groups/nils/data/scrna_pipeline/demo/fastq/SRR5071662 --no-db --dry-run</pre></div>
       <div class="out"><div class="out-head">you should see (top of the output)</div><pre>Job stats:
 job                  count
 -----------------  -------
@@ -247,9 +247,8 @@ samtools_index           1
 bcftools_mpileup         1
 bcftools_call            1
 bcftools_filter          1
-load_to_database         1
 all                      1
-total                   10</pre></div>
+total                    9</pre></div>
       <p>Below the table, each job is listed with its input and output files. What each step does:</p>
       <div class="tbl-wrap"><table>
         <thead><tr><th>Job</th><th>What it does</th></tr></thead>
@@ -261,13 +260,13 @@ total                   10</pre></div>
           <tr><td><code>bcftools_mpileup</code></td><td>Counts reference and alternative bases at each of the 7M common SNP positions.</td></tr>
           <tr><td><code>bcftools_call</code></td><td>Turns those counts into genotypes: <span class="gt">0/0</span> both copies reference, <span class="gt het">0/1</span> one of each, <span class="gt alt">1/1</span> both alternative.</td></tr>
           <tr><td><code>bcftools_filter</code></td><td>Keeps positions with at least 10 reads, and alternative calls with quality of at least 30.</td></tr>
-          <tr><td><code>load_to_database</code></td><td>Adds the genotypes to the shared database, recording who added them and with which pipeline version.</td></tr>
+          <tr><td><code>load_to_database</code></td><td>Adds the genotypes to the shared database, recording who added them and with which pipeline version. Not listed here because of <code>--no-db</code>.</td></tr>
         </tbody>
       </table></div>
       <p>The same for a whole-exome sample: note <code>bwa_align</code> instead of <code>star_align</code>.</p>
       <div class="cmd"><div class="cmd-head">terminal · in ~/scrna_demo<button class="copy" type="button">Copy</button></div><pre>scrna-pipeline --mode wes --sequencing paired --sample B2006 --run-id demo_B2006 \
-    --fastq-dir /groups/nils/data/scrna_pipeline/demo/fastq/B2006 --dry-run</pre></div>
-      <p class="muted">For real runs, drop <code>--dry-run</code>. Measured on this server, an RNA-seq profile takes 14 minutes (median of 40 runs, range 6–92 min). A WES sample takes 3–5.4 hours. Runs detach automatically, so you can close your laptop.</p>
+    --fastq-dir /groups/nils/data/scrna_pipeline/demo/fastq/B2006 --no-db --dry-run</pre></div>
+      <p class="muted">For a real run of your own samples, drop <code>--dry-run</code> and <code>--no-db</code> (please not during the workshop). Measured on this server, an RNA-seq profile takes 14 minutes (median of 40 runs, range 6–92 min). A WES sample takes 3–5.4 hours. Runs detach automatically, so you can close your laptop.</p>
     </section>
 
     <section id="database">
@@ -420,31 +419,25 @@ cut -f2 results/demux/$RUN/final_assignments.tsv | tail -n +2 | sort | uniq -c |
     </section>
 
     <section id="compare">
-      <h2><span class="num">6</span>Compare the four runs</h2>
-      <p>A notebook puts all four runs side by side. Copy it to your own folder, so you can edit and save it.</p>
+      <h2><span class="num">6</span>Draw your cell composition, then compare</h2>
+      <p>Each group draws the cell composition of its own run, then we put all four side by side. Copy the notebook to your own folder, so you can edit and save it.</p>
       <div class="cmd"><div class="cmd-head">terminal<button class="copy" type="button">Copy</button></div><pre>cp /groups/nils/data/scrna_pipeline/code/notebooks/06_demo_compare.ipynb ~/scrna_demo/
 code ~/scrna_demo/06_demo_compare.ipynb</pre></div>
       <ol class="steps">
         <li>In VS Code, click <b>Select Kernel</b> (top right) → <b>Python Environments…</b> → <b>Enter interpreter path</b>, and paste <code>/groups/nils/data/scrna_pipeline/env/bin/python</code></li>
-        <li>The notebook opens pointing at <b>pre-computed</b> results for all four runs, so it works even before your run finishes. To use your group's own run, change its ID in the <code>RUNS</code> cell, for example <code>'precomputed_guided7'</code> → <code>'group1_guided7'</code>.</li>
-        <li>Click <b>Run All</b>.</li>
+        <li>In the first code cell, set <code>MY_RUN</code> to your group's ID, for example <code>MY_RUN = 'group3_no_hct8'</code>.</li>
+        <li>Click <b>Run All</b>. Section 1 of the notebook draws <b>your</b> run's cell composition.</li>
+        <li>When every group has its graph, re-run section 2: all four compositions side by side, on the same scale and in the same bar order.</li>
       </ol>
-      <p>The notebook shows:</p>
-      <ul>
-        <li>a summary table: how many cells each run assigned to a single line;</li>
-        <li>a grid of cell counts per label for each run;</li>
-        <li>cell-by-cell agreement with the 7-line guided run: where does each cell go in the other runs?</li>
-        <li>the DLD1/HCT8 family: how each run labels those cells;</li>
-        <li>for the unguided run, which anonymous donor matched which cell line, and how confidently.</li>
-      </ul>
-      <p class="muted">No VS Code? Render the notebook to a web page instead: <code>jupyter nbconvert --to html --execute ~/scrna_demo/06_demo_compare.ipynb</code>, then open <code>06_demo_compare.html</code>.</p>
+      <p>How to read the composition graph: one bar per cell line, with its cell count on top. <b>Dark green</b> = matched (guided, or a confident database match), <b>orange</b> = matched with low confidence, <b>dark grey</b> = a Vireo donor that matched no fingerprint, <b>red</b> = doublets (the <b>dark red</b> part is HCT8+DLD1 pairs), <b>light grey</b> = unassigned.</p>
+      <p class="muted">A run that hasn't finished yet is replaced by its pre-computed copy, and the graph title says so. The unguided run (Group 2) takes about 80 minutes. No VS Code? Set <code>MY_RUN</code> in the copied file with any editor, then run <code>jupyter nbconvert --to html --execute ~/scrna_demo/06_demo_compare.ipynb</code> and open <code>06_demo_compare.html</code>.</p>
     </section>
 
     <section id="discuss">
       <h2><span class="num">7</span>Discussion</h2>
       <ol class="steps">
         <li>Which run assigned the most cells to a single line? Does more assigned mean more correct?</li>
-        <li>In the full 7-line run, why are so few cells called DLD1 or HCT8, and so many called an "HCT8+DLD1 doublet"?</li>
+        <li>In the full 7-line run, why are so few cells called DLD1 or HCT8, and what is the dark red part of the doublet bar?</li>
         <li>What happens to HCT8 cells when HCT8 is left off the list? And to DLD1 cells when DLD1 is left off?</li>
         <li>The unguided run needs no prior knowledge. What does it get right, and where does it struggle?</li>
         <li>What does this mean for designing a pool, and for reporting which cell lines you sequenced?</li>
@@ -476,7 +469,8 @@ code ~/scrna_demo/06_demo_compare.ipynb</pre></div>
           <tr><td><code>not found on PATH: samtools, …</code></td><td>Same fix: the shared environment isn't on your <code>PATH</code>.</td></tr>
           <tr><td><code>Permission denied</code> under <code>results/demux/…</code></td><td>Someone else already launched that group ID. Use your group's ID, or ask who launched it.</td></tr>
           <tr><td><code>Database locked by … — waiting...</code></td><td>Someone is adding data at that moment. It continues by itself once they finish.</td></tr>
-          <tr><td>Notebook says <code>… not found yet — skipped</code></td><td>That run hasn't finished. Use its <code>precomputed_…</code> ID for now.</td></tr>
+          <tr><td>Notebook says <code>… has not finished yet — showing its pre-computed copy</code></td><td>Your run is still going. Re-run the cell once your log says <code>Done</code>.</td></tr>
+          <tr><td>Notebook says <code>No results for …</code></td><td>Check the spelling of <code>MY_RUN</code>: it must be exactly one of the four group IDs.</td></tr>
         </tbody>
       </table></div>
       <h3>Where things live</h3>
